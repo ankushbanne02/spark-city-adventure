@@ -1,0 +1,182 @@
+You are a **senior React + Three.js game developer** working on an existing project:
+
+**Project Name:** Spark City Adventure – Electricity Transmission (Level 3)
+
+IMPORTANT:
+
+* The existing logic, state management, and step flow MUST NOT be changed.
+* Only enhance **Level 3 (Transmission stage)**.
+* Focus ONLY on **interactivity, engagement, and visual learning improvements**.
+
+---
+
+## STEP 1: Analyze Existing Code
+
+* The level uses:
+
+  * React Three Fiber (`@react-three/fiber`)
+  * Drei components
+  * Step-based progression (`step` state)
+  * Towers are clicked sequentially
+  * PowerLine + ElectricParticles simulate current flow
+* DO NOT break or modify:
+
+  * `handleTowerClick`
+  * `step logic`
+  * scoring / completion logic
+
+---
+
+## STEP 2: Add Component Labels (HIGH PRIORITY)
+
+Add clear floating labels above each component using Drei `<Html>`:
+
+Label the following:
+
+* Transformer → "Step-Up Transformer (132 kV)"
+* Tower 1 → "Transmission Tower 1"
+* Tower 2 → "Transmission Tower 2"
+* Tower 3 → "Transmission Tower 3"
+* Substation → "Substation (Step-Down)"
+
+Requirements:
+
+* Labels should:
+
+  * Always face camera
+  * Slightly float and animate (gentle up-down motion)
+  * Glow when active
+* Style:
+
+  * Clean UI (rounded, modern)
+  * Color based on active/inactive state
+
+---
+
+## STEP 3: Replace Click-to-Connect with Drag-and-Drop Wiring (MAIN FEATURE)
+
+Currently:
+
+* Wires appear automatically after clicking towers
+
+Change to:
+👉 **User must drag wire from one tower to next**
+
+### Interaction Design:
+
+1. User clicks active tower → starts wire drag
+2. Mouse movement → show preview wire (dynamic line)
+3. Hover on next valid tower → highlight it
+4. Release mouse:
+
+   * If correct target → connect wire
+   * If wrong → cancel
+
+---
+
+### Implementation Details:
+
+* Use `useState`:
+
+  * `isDragging`
+  * `startPoint`
+  * `currentMousePosition`
+  * `connections[]`
+
+* Use `raycaster` for mouse-to-3D mapping
+
+* Create:
+  👉 `DraggableWire` component
+
+  * Shows preview line while dragging
+
+* After successful connection:
+
+  * Trigger existing step progression (`handleTowerClick`)
+  * Activate existing PowerLine + particles
+
+---
+
+## STEP 4: Enhance Visual Feedback
+
+Add:
+
+### 1. Hover Effects
+
+* Towers glow on hover
+* Cursor changes to pointer
+
+### 2. Connection Feedback
+
+* On successful connection:
+
+  * Flash light pulse through wire
+  * Small spark animation at connection point
+
+### 3. Active Tower Indicator
+
+* Keep existing glow sphere
+* Add:
+
+  * Pulsing ring around tower base
+
+---
+
+## STEP 5: Improve Learning Experience
+
+Without changing logic:
+
+* When dragging wire:
+
+  * Show tooltip:
+    👉 "Connect high-voltage line to next tower"
+
+* After connection:
+
+  * Animate electricity flow stronger for 1 second
+
+* Add subtle realism:
+
+  * Slight wire sag animation
+  * Flicker effect for electricity
+
+---
+
+## STEP 6: Keep Everything Else SAME
+
+DO NOT:
+
+* Change step logic
+* Change explanation panel
+* Change scoring
+* Change UI layout
+* Change existing components structure
+
+ONLY enhance:
+
+* Interaction
+* Labels
+* Visual engagement
+
+---
+
+## FINAL GOAL
+
+Make Level 3 feel like:
+👉 A real **interactive science museum simulation**
+
+Where:
+
+* User actively builds transmission lines
+* Learns by doing (not just clicking)
+* Clearly understands each component visually
+
+---
+
+Deliver:
+
+* Clean, modular code
+* Reusable components (DraggableWire, Label3D, etc.)
+* No breaking changes
+
+---

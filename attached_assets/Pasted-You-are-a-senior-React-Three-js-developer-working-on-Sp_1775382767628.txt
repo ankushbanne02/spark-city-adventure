@@ -1,0 +1,221 @@
+You are a **senior React + Three.js developer** working on:
+
+**Spark City Adventure – Level 3 (Transmission)**
+
+---
+
+## 🚨 MAJOR CHANGE (IMPORTANT)
+
+We are now **REPLACING the existing wiring logic**
+
+REMOVE:
+
+* handleTowerClick usage
+* DRAG_SOURCES / DRAG_TARGETS
+* DragSourceHandle (blue sphere system)
+
+---
+
+## 🎯 NEW CORE IDEA
+
+👉 Progress should be controlled by **successful wire connections**, NOT clicks.
+
+---
+
+## 🧠 NEW STATE DESIGN
+
+Replace step logic trigger with:
+
+```js
+const [connections, setConnections] = useState<string[]>([]);
+```
+
+Valid connections:
+
+```js
+const CONNECTION_FLOW = [
+  'transformer-tower1',
+  'tower1-tower2',
+  'tower2-tower3'
+];
+```
+
+---
+
+## 🔌 FEATURE 1: TRUE DRAG SYSTEM
+
+### Interaction:
+
+1. Select Wire Tool
+2. Click on a component → start drag
+3. Move mouse → preview wire
+4. Release on another component
+
+---
+
+## 🎯 FEATURE 2: VALIDATION LOGIC
+
+On release:
+
+```js
+const connectionKey = `${start}-${end}`;
+```
+
+Check:
+
+```js
+if (connectionKey === CONNECTION_FLOW[currentStep]) {
+   // VALID
+} else {
+   // INVALID
+}
+```
+
+---
+
+## 🔄 FEATURE 3: UPDATE STEP FROM CONNECTIONS
+
+Replace step update logic:
+
+```js
+const nextStep = connections.length + 1;
+setStep(nextStep);
+```
+
+---
+
+## ⚡ FEATURE 4: TRANSFORMER → TOWER 1 FIX
+
+Ensure FIRST connection is:
+
+```js
+transformer → tower1
+```
+
+Add PowerLine:
+
+```jsx
+{step >= 1 && (
+  <PowerLine start={[-15, 8, 0]} end={[-8, 8, 0]} active />
+)}
+```
+
+AND ElectricParticles.
+
+---
+
+## 🎨 FEATURE 5: COMPONENT-BASED DRAGGING
+
+Modify:
+
+### Transformer + Tower
+
+Add:
+
+```js
+onPointerDown={(e) => {
+  if (wireToolActive && isValidStartComponent) {
+    startDrag(componentId, attachPosition);
+  }
+}}
+```
+
+---
+
+## 🧲 FEATURE 6: DRAG STATE
+
+```js
+const [dragging, setDragging] = useState(false);
+const [startNode, setStartNode] = useState(null);
+const [dragPosition, setDragPosition] = useState([0,0,0]);
+const [hoverTarget, setHoverTarget] = useState(null);
+```
+
+---
+
+## 🎨 FEATURE 7: PREVIEW WIRE
+
+While dragging:
+
+```jsx
+<DraggableWire start={startNode.position} end={dragPosition} />
+```
+
+---
+
+## 🎯 FEATURE 8: TARGET DETECTION
+
+* Highlight valid next component
+* Glow effect
+* Show “Release to connect”
+
+---
+
+## ❌ FEATURE 9: INVALID CONNECTION
+
+If wrong:
+
+* Show ErrorRing
+* Do NOT update step
+
+---
+
+## ⚡ FEATURE 10: SUCCESS FEEDBACK
+
+On correct connection:
+
+* Add to `connections`
+* Trigger:
+
+  * SparkBurst
+  * Flash animation
+  * Electricity flow
+
+---
+
+## 🧠 FEATURE 11: KEEP LEARNING SYSTEM
+
+DO NOT REMOVE:
+
+* Explanation modal
+* Score system
+* Volt messages
+
+Trigger them AFTER successful connection instead of click
+
+---
+
+## 🏁 FINAL EXPERIENCE
+
+User flow:
+
+1. Drag components → place them ✅
+2. Select Wire Tool ✅
+3. Drag:
+
+   * Transformer → Tower 1
+   * Tower 1 → Tower 2
+   * Tower 2 → Tower 3
+4. Each connection unlocks next step
+5. Electricity flows ⚡
+
+---
+
+## 🎮 FINAL RESULT
+
+This should feel like:
+
+👉 A real-world **power grid builder**
+👉 Fully interactive
+👉 Learning by doing
+👉 No artificial handles
+
+---
+
+Deliver:
+
+* Clean modular code
+* No hacks
+* Fully replaces old wiring logic
+
+---

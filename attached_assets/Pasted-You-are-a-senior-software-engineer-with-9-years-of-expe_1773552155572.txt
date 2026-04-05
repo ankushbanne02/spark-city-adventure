@@ -1,0 +1,147 @@
+You are a **senior software engineer with 9+ years of experience in React, Three.js, and large codebase refactoring**.
+
+I have **two projects**:
+
+PROJECT A → main game project (this is the base project).
+PROJECT B → contains additional capabilities that must be added to Project A.
+
+Your task is to **merge PROJECT B capabilities into PROJECT A**.
+
+IMPORTANT RULES
+
+1. Project A remains the **main application**.
+2. Do NOT rebuild the project.
+3. Do NOT delete existing functionality in Project A.
+4. Explicitly **import code from Project B and integrate it**.
+5. If a feature exists in both projects, **keep the better implementation from Project B**.
+
+---
+
+STEP 1 — ANALYZE BOTH PROJECTS
+
+First scan both codebases and identify:
+
+• UI components
+• Three.js scenes
+• model loaders
+• animations
+• physics / simulation logic
+• utility functions
+
+List the important capabilities of each project.
+
+---
+
+STEP 2 — EXTRACT CAPABILITIES FROM PROJECT B
+
+Explicitly copy these from Project B into Project A:
+
+• 3D scene setup
+• model loaders
+• turbine / generator animations
+• electricity flow visualization
+• appliance interaction logic
+• wiring simulation
+• lighting setup
+• camera control system
+
+Move these into Project A under:
+
+src/features/3d-engine
+
+---
+
+STEP 3 — INTEGRATE FEATURES INTO PROJECT A
+
+Modify Project A so that:
+
+Existing game levels now use the **new 3D systems from Project B**.
+
+Replace only the following systems in Project A:
+
+• scene renderer
+• model loading
+• animation system
+• electricity flow visualization
+
+Keep from Project A:
+
+• navigation
+• level system
+• UI panels
+• scoring system
+• instructions
+
+---
+
+STEP 4 — CREATE SHARED 3D ENGINE
+
+Create a shared module:
+
+src/engine
+
+This module must handle:
+
+• scene initialization
+• lighting
+• camera
+• model loading
+• electricity flow animation
+• interaction events
+
+All levels must use this engine.
+
+---
+
+STEP 5 — CONNECT LEVELS TO THE NEW ENGINE
+
+Update the levels so they use the merged engine.
+
+Levels must work like this:
+
+Level 1 → Hydro Dam (from Project B turbine animation)
+Level 2 → Generator system (from Project B electromagnetic model)
+Level 3 → Transmission towers (from Project B power-line system)
+Level 4 → Substation transformer
+Level 5 → Home entry (meter + MCB)
+Level 6 → Home wiring simulator
+Level 7 → Power consumption simulation
+Level 8 → Smart home activation
+
+---
+
+STEP 6 — REMOVE DUPLICATES
+
+After merging:
+
+• delete duplicate components
+• consolidate similar utilities
+• ensure there is only one renderer and one scene manager
+
+---
+
+STEP 7 — VERIFY MERGE SUCCESS
+
+Confirm the following features from Project B are working inside Project A:
+
+✓ turbine rotation
+✓ generator animation
+✓ electricity flow lines
+✓ appliance activation
+✓ wiring connections
+
+---
+
+FINAL RESULT
+
+The final project must be:
+
+• Project A structure
+• Project B 3D capabilities integrated inside it
+• clean and maintainable codebase
+
+Provide a summary explaining:
+
+1. which files were copied from Project B
+2. which files were modified in Project A
+3. where the new shared engine is located

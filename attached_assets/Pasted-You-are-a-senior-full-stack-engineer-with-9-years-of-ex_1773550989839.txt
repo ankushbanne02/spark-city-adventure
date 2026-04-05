@@ -1,0 +1,170 @@
+You are a **senior full-stack engineer with 9+ years of experience in React, Three.js, and interactive educational simulations**.
+
+I have **two existing projects** and I want to **merge their capabilities into one single project** without breaking existing functionality.
+
+IMPORTANT:
+Do NOT rewrite everything from scratch.
+Carefully analyze both projects and integrate them into a single clean architecture.
+
+---
+
+PROJECT A (BASE PROJECT)
+
+Use **Project A as the main base** of the application.
+
+Keep from Project A:
+
+• existing routing
+• project structure
+• game level flow
+• React UI layout
+• level navigation system
+• scoring / progress system
+• deployment configuration
+
+Project A will remain the **main application shell**.
+
+---
+
+PROJECT B (FEATURE PROJECT)
+
+Project B contains **better functionality and components** that must be integrated into Project A.
+
+Extract and integrate from Project B:
+
+• improved 3D models
+• Three.js scene setup
+• animation logic
+• electricity flow effects
+• appliance behavior
+• wiring simulation logic
+• turbine / generator mechanics
+
+Project B features must be **moved into Project A architecture**.
+
+---
+
+MERGE GOALS
+
+The final project must contain the **best parts of both projects**.
+
+Final capabilities must include:
+
+• clean React structure
+• stable Three.js 3D scenes
+• smooth animations
+• correct electricity flow simulation
+• responsive UI layout
+• no overlapping panels
+• reusable components
+
+---
+
+CREATE A CLEAN COMPONENT STRUCTURE
+
+Refactor the merged project into a clean structure:
+
+src/
+
+components/
+DamSystem
+GeneratorSystem
+TransmissionSystem
+SubstationSystem
+HomeSystem
+ApplianceSystem
+ElectricityFlow
+UIComponents
+
+scenes/
+Level1Dam
+Level2Generator
+Level3Transmission
+Level4Substation
+Level5HomeEntry
+Level6HomeWiring
+Level7PowerConsumption
+Level8SmartHome
+
+models/
+turbine
+generator
+transmissionTower
+transformer
+electricMeter
+mcbPanel
+appliances
+
+---
+
+UNIFY THREE.JS IMPLEMENTATION
+
+Currently both projects may use different 3D setups.
+
+Standardize everything using:
+
+React Three Fiber
+
+Ensure:
+
+• only one scene renderer
+• consistent camera controls
+• shared lighting system
+• reusable 3D model loaders
+
+---
+
+REMOVE DUPLICATE CODE
+
+During merging:
+
+• remove duplicated components
+• consolidate similar logic
+• avoid multiple scene managers
+• ensure reusable components
+
+---
+
+ENSURE LEVEL FLOW WORKS
+
+After merging, the game flow must remain:
+
+Level 1 – Hydro Dam
+Level 2 – Generator
+Level 3 – Transmission
+Level 4 – Substation
+Level 5 – Home Entry
+Level 6 – Home Wiring
+Level 7 – Power Consumption
+Level 8 – Smart Home
+
+Each level must load correctly.
+
+---
+
+FIX UI RESPONSIVENESS
+
+Ensure the UI works on:
+
+1366×768
+1920×1080
+large touch displays
+
+Requirements:
+
+• no overlapping panels
+• 3D scene always visible
+• panels scale properly
+
+---
+
+FINAL OUTPUT REQUIREMENTS
+
+The merged project must:
+
+• compile without errors
+• maintain original game flow
+• integrate improved 3D features
+• have clean maintainable architecture
+
+After merging, provide a **short summary of the changes made and the new project structure**.

@@ -1,0 +1,137 @@
+You are a senior React + Three.js developer working on an existing project:
+
+Project: Spark City Adventure
+Level: Level 3 – Electricity Transmission
+
+🚨 CRITICAL RULES (DO NOT BREAK)
+DO NOT change existing logic:
+step progression
+handleTowerClick
+scoring / stars / completion
+DO NOT remove existing components
+Only enhance interactivity layer on top
+🎯 GOAL
+
+Transform Level 3 into a Drag-and-Drop Interactive Builder System
+
+Instead of:
+❌ Clicking towers to auto-connect wires
+
+We want:
+✅ User builds the transmission system manually
+
+🧩 FEATURE 1: TOOLKIT PANEL (MAIN CHANGE)
+
+Create a left-side floating toolkit UI containing draggable items:
+
+Toolkit Items:
+Step-Up Transformer
+Tower 1
+Tower 2
+Tower 3
+Substation
+Power Line (wire tool)
+UI Requirements:
+Vertical panel (glassmorphism or modern card style)
+Each item:
+Icon + label
+Draggable
+Smooth hover + drag animations (framer-motion)
+🧲 FEATURE 2: DRAG & DROP INTO 3D SCENE
+Behavior:
+User drags item from toolkit → drops into 3D world
+Implementation:
+Use raycasting to convert mouse → 3D position
+
+Maintain state:
+
+placedComponents = [
+  { type: 'tower', id: 1, position: [...] }
+]
+Placement Rules:
+Snap to predefined positions:
+Transformer → left
+Towers → center positions (3 slots)
+Substation → right
+
+👉 IMPORTANT:
+Even though user drags freely, snap them to:
+
+TOWER_POSITIONS
+🔌 FEATURE 3: WIRE TOOL (DRAG TO CONNECT)
+
+After placing components:
+
+User selects Wire Tool → then:
+
+Click start component
+Drag to another component
+Release to connect
+Rules:
+Only allow valid sequence:
+Transformer → Tower1 → Tower2 → Tower3 → Substation
+On correct connection:
+✅ Trigger existing step logic (handleTowerClick)
+✅ Show existing PowerLine + ElectricParticles
+On wrong connection:
+❌ Show error feedback (shake / red glow)
+🏷️ FEATURE 4: SMART LABELS (VERY IMPORTANT)
+
+Add floating labels using <Html>:
+
+Step-Up Transformer (132 kV)
+Tower 1 / 2 / 3
+Substation (Step Down)
+Behavior:
+Appear only after component is placed
+Glow when active in current step
+Slight floating animation
+✨ FEATURE 5: ENGAGEMENT BOOSTERS
+1. Placement Feedback
+Snap animation when dropped
+Small ground ripple effect
+2. Connection Feedback
+Electric spark at connection
+Bright pulse moving through wire
+3. Guidance System
+Show hint:
+👉 "Drag Tower 1 to begin"
+👉 "Now connect Transformer to Tower 1"
+🧠 FEATURE 6: KEEP LEARNING FLOW SAME
+After each correct connection:
+Show existing explanation modal
+Keep formulas (P = I²R etc.)
+⚙️ TECH IMPLEMENTATION NOTES
+Use:
+useThree() → mouse + raycaster
+useFrame() → drag preview updates
+Create reusable components:
+DraggableItem
+DropZone
+WireConnector
+Label3D
+❌ DO NOT TOUCH
+Explanation panel logic
+Score system
+Step state transitions
+Existing visual components (only enhance)
+🏁 FINAL EXPERIENCE
+
+User should feel like:
+👉 They are building a real transmission network
+
+Flow:
+
+Drag components → place them
+Select wire tool → connect system
+Watch electricity flow ⚡
+Learn concepts interactively
+
+Make it feel like:
+🎮 A mix of game + simulation + science lab
+
+Deliver:
+
+Clean modular code
+No breaking changes
+Fully working Level 3 only

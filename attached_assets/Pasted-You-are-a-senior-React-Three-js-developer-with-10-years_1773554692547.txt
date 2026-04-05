@@ -1,0 +1,366 @@
+You are a **senior React + Three.js developer with 10 years of experience building interactive science museum exhibits and educational simulations for children**.
+
+You are working on an existing project called:
+
+**Spark City Adventure – From Generation to Home Electricity**
+
+Do **NOT rebuild the project**.
+Modify the existing implementation.
+
+This game will be used in a **science park exhibit for kids**, so it must be:
+
+• educational
+• interactive
+• visually clean
+• easy to understand
+• responsive on laptop and mobile
+
+The current implementation has several issues that must be fixed.
+
+---
+
+# GLOBAL CHANGES (VERY IMPORTANT)
+
+### 1. Remove blur effect everywhere
+
+Currently the screen becomes **blurred when a level is completed**.
+
+This must be removed.
+
+Instead:
+
+• show a **Level Complete panel**
+• add a **NEXT button**
+• allow the user to read the explanation before continuing
+
+The screen must **never blur**.
+
+---
+
+### 2. Slow down the game flow
+
+Currently actions happen too fast.
+
+Fix the gameplay flow:
+
+Instruction → User Action → Explanation → NEXT button
+
+The game must **never automatically jump to the next level**.
+
+Every stage must require clicking **Next**.
+
+---
+
+### 3. Improve UI for children
+
+Current UI is too glowing and harsh.
+
+Update the UI to be **kid-friendly**:
+
+• soft colors
+• rounded cards
+• playful icons
+• large readable fonts
+• minimal glow effects
+
+Use colors similar to educational apps.
+
+---
+
+### 4. Make layout responsive
+
+The final screen is not aligned with laptop display.
+
+Fix responsiveness so it works on:
+
+• laptop (1366×768)
+• desktop (1920×1080)
+• tablets
+• mobile screens
+
+Rules:
+
+• no elements outside screen
+• no overlapping panels
+• UI adapts automatically
+• 3D canvas resizes dynamically
+
+---
+
+### 5. White background for 3D scenes
+
+All 3D environments must use a **clean white background** instead of colored gradient backgrounds.
+
+This improves clarity for educational demonstrations.
+
+---
+
+# LEVEL-BY-LEVEL CHANGES
+
+---
+
+# LEVEL 1 – HYDROELECTRIC DAM
+
+The **Generation Sequence panel** must contain clear step instructions.
+
+Add detailed scientific explanations.
+
+Steps must appear one by one:
+
+1. Open the dam gate
+2. Water flows through tunnel
+3. Turbine spins
+4. Generator rotates
+5. Electricity generated
+
+Add educational explanation:
+
+Water at height stores **potential energy**
+When released it becomes **kinetic energy**
+This spins the **turbine blades**
+The turbine rotates the **generator rotor**
+Moving magnetic fields create electricity using **Faraday's Law of Electromagnetic Induction**
+
+Add small formulas:
+
+Potential Energy = mgh
+Kinetic Energy = ½mv²
+Faraday's Law: EMF = − dΦ/dt
+
+Show this inside the **Generation Sequence panel**.
+
+---
+
+# LEVEL 2 – GENERATOR MECHANISM
+
+Remove screen blur when level finishes.
+
+Instead:
+
+Show a **Next button**.
+
+Explain generator mechanism clearly.
+
+Add detailed explanation:
+
+Rotor = rotating magnet
+Stator = copper coils
+
+When the rotor spins:
+
+Magnetic field cuts through stator coils.
+
+This induces **alternating current (AC)**.
+
+Add animation showing:
+
+magnetic field lines rotating.
+
+---
+
+# LEVEL 3 – GENERATOR ELECTROMAGNETIC MODEL
+
+Everything happens too fast.
+
+Fix by introducing **step-based explanation**.
+
+Steps:
+
+1. Rotor rotates
+2. Magnetic field changes
+3. Current induced in stator coils
+4. AC waveform produced
+
+Add **Next button for each step**.
+
+Do NOT blur the screen.
+
+---
+
+# LEVEL 4 – TRANSMISSION SYSTEM
+
+On the **left side of the screen**, show a small 3D visual diagram explaining the full electricity flow:
+
+Dam → Turbine → Generator → Transmission Tower.
+
+Add a mini animated 3D flow diagram.
+
+Explanation:
+
+Electricity from the generator is stepped up to high voltage.
+
+Why?
+
+Because high voltage reduces energy loss.
+
+Power loss formula:
+
+P = I²R
+
+High voltage means **lower current**, so less heat loss.
+
+Add information about where transmission towers are used:
+
+They carry electricity from power plants to cities.
+
+---
+
+# LEVEL 5 – SUBSTATION
+
+Show clearly where electricity goes next.
+
+Sequence must be shown:
+
+Transmission tower → Substation → Step-down transformer → City grid.
+
+Add explanation:
+
+Transmission voltage: 132 kV
+
+This voltage is too high for homes.
+
+Substations reduce voltage to:
+
+11 kV for city distribution.
+
+Then neighborhood transformers reduce it further to:
+
+230V for homes.
+
+Add Next button.
+
+Do not blur screen.
+
+---
+
+# LEVEL 6 – ELECTRICITY ENTERS HOME
+
+Improve the **3D house model** to look more realistic.
+
+Add:
+
+• electric pole
+• service wire
+• electric meter
+• MCB panel
+
+Show electricity path:
+
+Substation → Street transformer → Electric pole → Meter → MCB → House wiring.
+
+Add explanation for wiring.
+
+Three wires must be shown:
+
+Phase wire
+Neutral wire
+Earth wire
+
+Explain materials:
+
+Phase wire – copper conductor with PVC insulation
+Neutral wire – return path for current
+Earth wire – safety grounding to prevent electric shock
+
+---
+
+# LEVEL 7 – HOME WIRING SIMULATOR
+
+Improve the 3D house model to be more realistic.
+
+Allow the user to **install appliances manually**.
+
+Rooms must include:
+
+Hall
+Living room
+Bedroom
+
+When user clicks each room tab on the right side:
+
+Show components for that room.
+
+Example:
+
+Hall:
+
+Bulb
+Fan
+TV
+
+Kitchen:
+
+Bulb
+Refrigerator
+Washing machine
+
+Bedroom:
+
+Bulb
+Fan
+TV
+
+Add small diagram on the **left side** showing electricity path from previous levels:
+
+Dam → Generator → Transmission → Substation → House.
+
+This reminds the player where electricity is coming from.
+
+---
+
+# LEVEL 8 – POWER CONSUMPTION
+
+Show a **3D house model**.
+
+Allow the player to switch on appliances.
+
+Each appliance must show power usage:
+
+Bulb – 9W
+Fan – 70W
+TV – 120W
+Refrigerator – 300W
+Washing machine – 500W
+
+Show power consumption increasing in real time.
+
+Explain energy formula:
+
+Energy = Power × Time
+
+Example:
+
+1000W for 1 hour = 1 kWh.
+
+---
+
+# FINAL SCREEN
+
+Fix alignment.
+
+Make the final screen responsive and centered.
+
+Display:
+
+City Powered!
+
+Show final score.
+
+Add **Play Again button**.
+
+Ensure this page fits laptop and mobile screens.
+
+---
+
+# FINAL RESULT
+
+The finished game must feel like a **science museum interactive exhibit** where kids clearly understand:
+
+Water → Turbine → Generator → Transmission → Substation → Home Wiring → Appliances → Electricity Consumption.
+
+The game must be:
+
+• visually clear
+• educational
+• responsive
+• easy for children to understand.
