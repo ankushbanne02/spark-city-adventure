@@ -472,8 +472,7 @@ const DragPlane = ({ active, onMove, onRelease }: {
   return (
     <mesh position={[0,8.5,0]} rotation={[-Math.PI/2,0,0]}
       onPointerMove={(e) => { e.stopPropagation(); onMove(e.point); }}
-      onPointerUp={(e) => { e.stopPropagation(); onRelease(); }}
-      onPointerLeave={() => onRelease()}>
+      onPointerUp={(e) => { e.stopPropagation(); onRelease(); }}>
       <planeGeometry args={[120,120]} />
       <meshBasicMaterial transparent opacity={0} depthWrite={false} />
     </mesh>
@@ -576,6 +575,22 @@ const SceneContent = ({
     setHoverTarget(null);
     setWireStartNode(null);
   }, [wireDragging, hoverTarget, wireStartNode, step, wireDragPos, orbitRef, onSuccessfulConnection, onFailedConnection]);
+
+  // Global pointer-up safety net: if the user releases the mouse anywhere
+  // outside the Three.js canvas the DragPlane never receives the event,
+  // leaving the scene frozen. This listener catches that case.
+  // Also guard against Escape key to cancel a stuck drag.
+  useEffect(() => {
+    if (!wireDragging) return;
+    const onGlobalPointerUp = () => handleRelease();
+    const onEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') handleRelease(); };
+    window.addEventListener('pointerup', onGlobalPointerUp);
+    window.addEventListener('keydown', onEscape);
+    return () => {
+      window.removeEventListener('pointerup', onGlobalPointerUp);
+      window.removeEventListener('keydown', onEscape);
+    };
+  }, [wireDragging, handleRelease]);
 
   // Cleanup old effects
   useEffect(() => {
