@@ -1,0 +1,192 @@
+You are a **senior React + Three.js developer** working on:
+
+**Spark City Adventure – Level 5 (Home Wiring)**
+
+---
+
+## 🚨 CRITICAL INSTRUCTION
+
+* KEEP the existing 3D house model and structure
+* DO NOT remove or redesign the house
+* You MAY slightly adjust layout for better interaction:
+
+  * Open one wall or make it semi-transparent
+  * Add interaction zones (snap points)
+  * Reposition components slightly for clarity
+
+---
+
+## 🎯 GOAL
+
+Convert the existing house scene into:
+
+👉 Interactive **home wiring simulation**
+
+---
+
+## 🔧 FEATURE 1: TOOLKIT (LEFT PANEL)
+
+Add draggable items:
+
+* Electric Meter
+* Main Switch
+* MCB Panel
+* Phase Wire (Red)
+* Neutral Wire (Blue)
+* Earth Wire (Green)
+
+---
+
+## 🧲 FEATURE 2: DRAG & DROP COMPONENT PLACEMENT
+
+User places components inside the SAME house:
+
+Snap zones:
+
+* Meter → exterior wall (left side)
+* Main Switch → interior wall near entry
+* MCB Panel → inside panel area
+
+---
+
+### IMPORTANT:
+
+Use existing coordinates from scene
+DO NOT create a new house layout
+
+---
+
+## 🔌 FEATURE 3: DRAG & DROP WIRING SYSTEM
+
+User selects wire type and connects:
+
+1. Click start component
+2. Drag wire
+3. Release on target component
+
+---
+
+## 🔁 VALID CONNECTION FLOW
+
+Pole → Meter → Switch → MCB → House
+
+---
+
+## 🎨 FEATURE 4: COLOR-CODED WIRES
+
+* Phase → Red (live 240V ⚠)
+* Neutral → Blue (return path)
+* Earth → Green (safety)
+
+---
+
+## ⚡ FEATURE 5: ELECTRICITY FLOW VISUALIZATION
+
+After correct wiring:
+
+* Animate current flow along wires
+* Use glow + moving particles
+* Intensity based on voltage
+
+---
+
+## 🏠 FEATURE 6: HOUSE INTERACTION (INSIDE SAME HOUSE)
+
+Add inside the existing house:
+
+* Bulb (ceiling or wall)
+
+---
+
+### Behavior:
+
+* Correct wiring → bulb ON 💡
+* Missing wire → bulb OFF
+* Wrong connection → flicker or spark
+
+---
+
+## ⚠️ FEATURE 7: ERROR FEEDBACK
+
+* Wrong wiring → spark effect
+* Missing earth → warning message
+* Incomplete circuit → no power
+
+---
+
+## 🏷️ FEATURE 8: LABELS
+
+Add floating labels inside house:
+
+* Electric Meter
+* Main Switch
+* MCB Panel
+* Phase / Neutral / Earth wires
+
+Labels should:
+
+* Face camera
+* Glow when active
+* Help learning
+
+---
+
+## 🧠 FEATURE 9: LEARNING FEEDBACK
+
+On each correct action:
+
+* Show short explanation
+* Show safety tip
+
+Example:
+"⚠ Phase wire carries 240V — never touch!"
+
+---
+
+## 🎨 FEATURE 10: MINIMAL LAYOUT ADJUSTMENTS
+
+Allowed improvements:
+
+* Make front wall semi-transparent OR removable
+* Add highlight zones for placement
+* Improve visibility inside house
+
+---
+
+## ❌ DO NOT
+
+* Remove house
+* Replace 3D scene
+* Change overall design
+
+---
+
+## 🏁 FINAL EXPERIENCE
+
+User should:
+
+1. See existing house
+2. Drag components into it
+3. Wire the system manually
+4. Fix mistakes
+5. Power the house successfully
+
+---
+
+## 🎯 RESULT
+
+Make it feel like:
+
+🏠 Real home wiring simulation
+🎮 Hands-on electrician training
+⚡ Learn by doing
+
+---
+
+Deliver:
+
+* Clean modular code
+* Reuse existing scene
+* Add interaction layer on top
+
+---
