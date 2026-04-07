@@ -1,435 +1,926 @@
-import React, { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
-import { initBasicScene } from '../../utils/three-helpers';
+import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/game-store';
 import { InfoCard } from '../GameUI';
 
-const STEPS = [
-  {
-    title: '1. Service Pole & Cable',
-    icon: '🔌',
-    color: '#3b82f6',
-    info: '240V AC electricity arrives from the national grid through overhead cables. The utility pole is the last connection of the distribution network before electricity enters your house.',
-    voltMsg: "🔌 The SERVICE POLE brings 240V AC from the grid! Thick overhead cables carry high-current electricity to your home.",
-  },
-  {
-    title: '2. Electric Meter',
-    icon: '📊',
-    color: '#8b5cf6',
-    info: 'The Electric Meter counts every kilowatt-hour (kWh) you use. 1 kWh = 1000 Watts running for 1 hour. The utility reads this meter monthly to calculate your electricity bill!',
-    voltMsg: "📊 The ELECTRIC METER is connected! It counts kWh. 1 kWh = 1000W for 1 hour. Every unit on your bill started here!",
-  },
-  {
-    title: '3. Main Switch (Isolator)',
-    icon: '🔴',
-    color: '#ef4444',
-    info: 'The Main Isolator Switch cuts ALL electricity to the house instantly. ALWAYS turn this OFF before any electrical work — it\'s your primary safety control!',
-    voltMsg: "🔴 MAIN SWITCH installed! Cuts ALL power instantly. Always turn it OFF before touching any wires — safety first!",
-  },
-  {
-    title: '4. MCB Panel (Distribution Board)',
-    icon: '🛡️',
-    color: '#059669',
-    info: 'The MCB Panel has separate circuit breakers for each room. If a fault occurs, the MCB trips automatically in 0.01 seconds — faster than a heartbeat — preventing fires and shocks!',
-    voltMsg: "🛡️ MCB PANEL installed! Each breaker protects one room. Trips in 0.01 seconds when a fault occurs!",
-  },
-  {
-    title: '5. Three Essential Wires',
-    icon: '🔴🔵🟢',
-    color: '#f59e0b',
-    info: 'Every circuit has 3 wires:\n• PHASE (Red): Live 240V — never touch!\n• NEUTRAL (Blue): Returns current to grid.\n• EARTH (Green): Safety — diverts fault current to ground!',
-    voltMsg: "⭐ THREE WIRES complete the circuit! Phase=240V Live, Neutral=return path, Earth=safety ground!",
-  },
+// ─────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────
+
+type ComponentId = 'meter' | 'switch' | 'mcb';
+type WireType = 'phase' | 'neutral' | 'earth';
+type NodeId =
+  | 'pole_out'
+  | 'meter_in' | 'meter_out'
+  | 'switch_in' | 'switch_out'
+  | 'mcb_in' | 'mcb_bulb' | 'mcb_fan' | 'mcb_socket'
+  | 'bulb_in' | 'fan_in' | 'socket_in';
+
+interface Wire {
+  id: string;
+  from: NodeId;
+  to: NodeId;
+  wireType: WireType;
+}
+
+// ─────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────
+
+const WIRE_COLORS: Record<WireType, string> = {
+  phase: '#ef4444',
+  neutral: '#3b82f6',
+  earth: '#22c55e',
+};
+
+const WIRE_LABELS: Record<WireType, string> = {
+  phase: 'Phase (Red)',
+  neutral: 'Neutral (Blue)',
+  earth: 'Earth (Green)',
+};
+
+// Node positions in SVG space (viewBox 0 0 860 480)
+const NODE_POS: Record<NodeId, { x: number; y: number }> = {
+  pole_out:    { x: 116, y: 198 },
+  meter_in:    { x: 162, y: 198 },
+  meter_out:   { x: 218, y: 198 },
+  switch_in:   { x: 298, y: 198 },
+  switch_out:  { x: 358, y: 198 },
+  mcb_in:      { x: 438, y: 198 },
+  mcb_bulb:    { x: 524, y: 168 },
+  mcb_fan:     { x: 524, y: 200 },
+  mcb_socket:  { x: 524, y: 232 },
+  bulb_in:     { x: 630, y: 168 },
+  fan_in:      { x: 700, y: 200 },
+  socket_in:   { x: 680, y: 310 },
+};
+
+// Which connections are valid and in what order they can be made
+const VALID_CONNECTIONS: [NodeId, NodeId][] = [
+  ['pole_out', 'meter_in'],
+  ['meter_out', 'switch_in'],
+  ['switch_out', 'mcb_in'],
+  ['mcb_bulb', 'bulb_in'],
+  ['mcb_fan', 'fan_in'],
+  ['mcb_socket', 'socket_in'],
 ];
 
-const addWire = (scene: THREE.Scene, pts: THREE.Vector3[], color: number, radius = 0.07): THREE.Mesh => {
-  const curve = new THREE.CatmullRomCurve3(pts);
-  const geo = new THREE.TubeGeometry(curve, 20, radius, 7, false);
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
-  const mesh = new THREE.Mesh(geo, mat);
-  scene.add(mesh);
-  return mesh;
-};
-
-/* Step 0: Utility pole + dim service cable */
-const buildStep0 = (scene: THREE.Scene) => {
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.22, 0.28, 13, 12),
-    new THREE.MeshStandardMaterial({ color: 0x5a3a20, roughness: 0.9 })
+function isValidConnection(from: NodeId, to: NodeId): boolean {
+  return VALID_CONNECTIONS.some(
+    ([a, b]) => (a === from && b === to) || (a === to && b === from)
   );
-  pole.position.set(-10, 6.5, 0);
-  scene.add(pole);
-  const arm = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.2, 0.2), new THREE.MeshStandardMaterial({ color: 0x6a4a30 }));
-  arm.position.set(-10, 11.5, 0);
-  scene.add(arm);
-  [-0.8, 0.8].forEach(dx => {
-    const ins = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.4, 8), new THREE.MeshStandardMaterial({ color: 0x9090bb }));
-    ins.position.set(-10 + dx, 11.3, 0);
-    scene.add(ins);
-  });
-  // Dim unlit cable
-  addWire(scene, [
-    new THREE.Vector3(-10, 11.3, 0),
-    new THREE.Vector3(-8.8, 9.5, -1),
-    new THREE.Vector3(-8.4, 7.5, -1),
-  ], 0x444444, 0.06);
+}
+
+const COMPONENT_INFO: Record<ComponentId, { label: string; icon: string; tip: string }> = {
+  meter: {
+    label: 'Electric Meter',
+    icon: '📊',
+    tip: 'Counts every kWh you use. 1 kWh = 1000W for 1 hour — this is how your electricity bill is calculated!',
+  },
+  switch: {
+    label: 'Main Switch',
+    icon: '🔴',
+    tip: 'Isolates ALL power instantly. Always turn this OFF before doing any electrical work — safety first!',
+  },
+  mcb: {
+    label: 'MCB Panel',
+    icon: '🛡️',
+    tip: 'Miniature Circuit Breakers protect each room. They trip in 0.01 seconds — faster than a heartbeat!',
+  },
 };
 
-/* Step 1: Electric Meter — on exterior left wall (x=-8.4, z=-1) */
-const buildStep1 = (scene: THREE.Scene) => {
-  // Dark mounting back plate
-  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.15, 3.4, 2.4), new THREE.MeshStandardMaterial({ color: 0x2c3e50, metalness: 0.4 }));
-  plate.position.set(-8.35, 3.5, -1);
-  scene.add(plate);
-  // White meter casing
-  const casing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3.0, 2.0), new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.3 }));
-  casing.position.set(-8.1, 3.5, -1);
-  scene.add(casing);
-  // LCD display window
-  const lcd = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 1.3), new THREE.MeshStandardMaterial({ color: 0xc8f0d0, roughness: 0.2 }));
-  lcd.position.set(-7.85, 3.8, -1);
-  scene.add(lcd);
-  // Rotating dial
-  const dial = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.1, 20), new THREE.MeshStandardMaterial({ color: 0xfafafa }));
-  dial.rotation.z = Math.PI / 2;
-  dial.position.set(-7.85, 3.0, -1);
-  scene.add(dial);
-  const needle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.45, 0.08), new THREE.MeshStandardMaterial({ color: 0xcc3333 }));
-  needle.position.set(-7.82, 3.0, -1);
-  needle.rotation.x = Math.PI / 6;
-  scene.add(needle);
-  // kWh label bar (yellow strip)
-  const strip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.3, 1.8), new THREE.MeshStandardMaterial({ color: 0xffd700 }));
-  strip.position.set(-7.85, 2.2, -1);
-  scene.add(strip);
-  // Lit cable: pole → meter
-  addWire(scene, [
-    new THREE.Vector3(-10, 11.3, 0),
-    new THREE.Vector3(-8.8, 9.5, -1),
-    new THREE.Vector3(-8.4, 7.5, -1),
-    new THREE.Vector3(-8.4, 4.5, -1),
-  ], 0xddaa00, 0.07);
+const TOOLKIT_ITEMS = [
+  { id: 'meter' as ComponentId, label: 'Electric Meter', icon: '📊', color: '#8b5cf6' },
+  { id: 'switch' as ComponentId, label: 'Main Switch', icon: '🔴', color: '#ef4444' },
+  { id: 'mcb' as ComponentId, label: 'MCB Panel', icon: '🛡️', color: '#059669' },
+];
+
+// ─────────────────────────────────────────────
+// Wire Type Selector
+// ─────────────────────────────────────────────
+
+const WireSelector = ({
+  selected,
+  onSelect,
+}: {
+  selected: WireType | null;
+  onSelect: (w: WireType | null) => void;
+}) => (
+  <div className="game-panel">
+    <h3 className="font-bold text-slate-700 mb-2" style={{ fontSize: '0.88rem' }}>
+      🔌 Select Wire Type
+    </h3>
+    <div className="flex flex-col gap-1.5">
+      {(['phase', 'neutral', 'earth'] as WireType[]).map(w => (
+        <button
+          key={w}
+          onClick={() => onSelect(selected === w ? null : w)}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl font-bold transition-all text-left"
+          style={{
+            background: selected === w ? `${WIRE_COLORS[w]}22` : '#f8fafc',
+            border: `2px solid ${selected === w ? WIRE_COLORS[w] : '#e2e8f0'}`,
+            color: WIRE_COLORS[w],
+            fontSize: '0.82rem',
+            boxShadow: selected === w ? `0 0 10px ${WIRE_COLORS[w]}44` : 'none',
+          }}
+        >
+          <div
+            className="rounded-full flex-shrink-0"
+            style={{ width: 12, height: 12, background: WIRE_COLORS[w] }}
+          />
+          {WIRE_LABELS[w]}
+        </button>
+      ))}
+    </div>
+    {selected && (
+      <p className="text-xs text-slate-400 mt-2 text-center">
+        Click a source node, then a destination node
+      </p>
+    )}
+  </div>
+);
+
+// ─────────────────────────────────────────────
+// SVG House Diagram
+// ─────────────────────────────────────────────
+
+interface DiagramProps {
+  placed: Set<ComponentId>;
+  wires: Wire[];
+  pendingFrom: NodeId | null;
+  selectedWire: WireType | null;
+  hoverNode: NodeId | null;
+  onNodeClick: (id: NodeId) => void;
+  onNodeHover: (id: NodeId | null) => void;
+  onZoneClick: (id: ComponentId) => void;
+  powered: boolean;
+}
+
+const HouseDiagram = ({
+  placed, wires, pendingFrom, selectedWire, hoverNode,
+  onNodeClick, onNodeHover, onZoneClick, powered,
+}: DiagramProps) => {
+  const hasWire = (from: NodeId, to: NodeId, type?: WireType) =>
+    wires.some(w =>
+      ((w.from === from && w.to === to) || (w.from === to && w.to === from)) &&
+      (type ? w.wireType === type : true)
+    );
+
+  const isNodeActive = (id: NodeId) => id === pendingFrom || id === hoverNode;
+
+  const renderNode = (id: NodeId, label?: string) => {
+    const pos = NODE_POS[id];
+    const active = isNodeActive(id);
+    return (
+      <g
+        key={id}
+        style={{ cursor: selectedWire ? 'pointer' : 'default' }}
+        onClick={() => selectedWire && onNodeClick(id)}
+        onMouseEnter={() => onNodeHover(id)}
+        onMouseLeave={() => onNodeHover(null)}
+      >
+        <circle
+          cx={pos.x} cy={pos.y} r={7}
+          fill={active ? '#fbbf24' : '#fff'}
+          stroke={active ? '#f59e0b' : '#64748b'}
+          strokeWidth={active ? 3 : 2}
+          style={{ filter: active ? 'drop-shadow(0 0 4px #fbbf24)' : 'none' }}
+        />
+        {label && (
+          <text x={pos.x} y={pos.y + 18} textAnchor="middle" fontSize={9} fill="#64748b" fontWeight="600">{label}</text>
+        )}
+      </g>
+    );
+  };
+
+  const renderWires = () =>
+    wires.map(w => {
+      const from = NODE_POS[w.from];
+      const to = NODE_POS[w.to];
+      const offset = w.wireType === 'phase' ? -5 : w.wireType === 'neutral' ? 0 : 5;
+      return (
+        <g key={w.id}>
+          <line
+            x1={from.x} y1={from.y + offset}
+            x2={to.x} y2={to.y + offset}
+            stroke={WIRE_COLORS[w.wireType]}
+            strokeWidth={3}
+            strokeLinecap="round"
+            opacity={0.85}
+          />
+          {powered && (
+            <line
+              x1={from.x} y1={from.y + offset}
+              x2={to.x} y2={to.y + offset}
+              stroke="#fff"
+              strokeWidth={1}
+              strokeDasharray="6 12"
+              opacity={0.7}
+            >
+              <animate attributeName="stroke-dashoffset" from="0" to="-18" dur="0.4s" repeatCount="indefinite" />
+            </line>
+          )}
+        </g>
+      );
+    });
+
+  const bulbWires = (['phase', 'neutral', 'earth'] as WireType[]).filter(t =>
+    hasWire('mcb_bulb', 'bulb_in', t)
+  );
+  const fanWires = (['phase', 'neutral', 'earth'] as WireType[]).filter(t =>
+    hasWire('mcb_fan', 'fan_in', t)
+  );
+  const socketWires = (['phase', 'neutral', 'earth'] as WireType[]).filter(t =>
+    hasWire('mcb_socket', 'socket_in', t)
+  );
+  const bulbOn = bulbWires.length === 3 && powered;
+  const fanOn = fanWires.length === 3 && powered;
+  const socketOn = socketWires.length === 3 && powered;
+
+  return (
+    <svg viewBox="0 0 860 480" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+      {/* Sky background */}
+      <defs>
+        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#e0f2fe" />
+          <stop offset="100%" stopColor="#bae6fd" />
+        </linearGradient>
+        <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#86efac" />
+          <stop offset="100%" stopColor="#4ade80" />
+        </linearGradient>
+        <radialGradient id="bulbGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#fef08a" stopOpacity="0.9" />
+          <stop offset="100%" stopColor="#fef08a" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="socketGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#fb923c" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#fb923c" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      <rect width="860" height="480" fill="url(#sky)" />
+      <rect x="0" y="380" width="860" height="100" fill="url(#grass)" />
+
+      {/* ── Utility Pole ── */}
+      <rect x="58" y="100" width="14" height="300" rx="3" fill="#92400e" />
+      <rect x="44" y="100" width="42" height="8" rx="2" fill="#a16207" />
+      {/* Insulators */}
+      <ellipse cx="52" cy="104" rx="5" ry="3" fill="#94a3b8" />
+      <ellipse cx="78" cy="104" rx="5" ry="3" fill="#94a3b8" />
+      <text x="65" y="90" textAnchor="middle" fontSize={10} fill="#475569" fontWeight="700">
+        UTILITY POLE
+      </text>
+      {/* Service cable from pole */}
+      <path d="M78 104 Q130 140 162 198" stroke="#374151" strokeWidth={3} fill="none" strokeDasharray="6 3" />
+
+      {/* ── House Outline ── */}
+      <rect x="130" y="80" width="700" height="320" rx="8" fill="white" stroke="#cbd5e1" strokeWidth="2" />
+      {/* Roof */}
+      <polygon points="130,80 480,30 830,80" fill="#475569" />
+
+      {/* Interior walls (room divisions) */}
+      <line x1="380" y1="80" x2="380" y2="400" stroke="#e2e8f0" strokeWidth="8" />
+      <line x1="570" y1="80" x2="570" y2="400" stroke="#e2e8f0" strokeWidth="8" />
+
+      {/* Room labels */}
+      <text x="255" y="110" textAnchor="middle" fontSize={11} fill="#94a3b8" fontWeight="600">ENTRY / PANEL</text>
+      <text x="475" y="110" textAnchor="middle" fontSize={11} fill="#94a3b8" fontWeight="600">LIVING ROOM</text>
+      <text x="700" y="110" textAnchor="middle" fontSize={11} fill="#94a3b8" fontWeight="600">BEDROOM / KITCHEN</text>
+
+      {/* ── Snap Zones ── */}
+
+      {/* Meter zone */}
+      <rect
+        x="152" y="165" width="76" height="70" rx="6"
+        fill={placed.has('meter') ? '#ede9fe' : '#f1f5f9'}
+        stroke={placed.has('meter') ? '#8b5cf6' : '#cbd5e1'}
+        strokeWidth="2" strokeDasharray={placed.has('meter') ? '0' : '5 3'}
+        style={{ cursor: placed.has('meter') ? 'default' : 'pointer' }}
+        onClick={() => !placed.has('meter') && onZoneClick('meter')}
+      />
+      {placed.has('meter') ? (
+        <g>
+          <rect x="156" y="170" width="66" height="56" rx="4" fill="white" stroke="#8b5cf6" strokeWidth="1.5" />
+          <text x="189" y="189" textAnchor="middle" fontSize={14}>📊</text>
+          <text x="189" y="206" textAnchor="middle" fontSize={8} fill="#7c3aed" fontWeight="700">ELECTRIC</text>
+          <text x="189" y="216" textAnchor="middle" fontSize={8} fill="#7c3aed" fontWeight="700">METER</text>
+          <rect x="166" y="222" width="46" height="4" rx="2" fill="#ddd6fe" />
+        </g>
+      ) : (
+        <text x="190" y="205" textAnchor="middle" fontSize={9} fill="#94a3b8">+ Meter</text>
+      )}
+
+      {/* Switch zone */}
+      <rect
+        x="278" y="165" width="90" height="70" rx="6"
+        fill={placed.has('switch') ? '#fee2e2' : '#f1f5f9'}
+        stroke={placed.has('switch') ? '#ef4444' : '#cbd5e1'}
+        strokeWidth="2" strokeDasharray={placed.has('switch') ? '0' : '5 3'}
+        style={{ cursor: placed.has('switch') ? 'default' : 'pointer' }}
+        onClick={() => !placed.has('switch') && onZoneClick('switch')}
+      />
+      {placed.has('switch') ? (
+        <g>
+          <rect x="282" y="170" width="80" height="56" rx="4" fill="white" stroke="#ef4444" strokeWidth="1.5" />
+          <text x="322" y="189" textAnchor="middle" fontSize={14}>🔴</text>
+          <text x="322" y="206" textAnchor="middle" fontSize={8} fill="#dc2626" fontWeight="700">MAIN</text>
+          <text x="322" y="216" textAnchor="middle" fontSize={8} fill="#dc2626" fontWeight="700">SWITCH</text>
+          {/* Lever */}
+          <rect x="316" y="220" width="12" height="10" rx="2" fill="#fbbf24" />
+        </g>
+      ) : (
+        <text x="323" y="205" textAnchor="middle" fontSize={9} fill="#94a3b8">+ Switch</text>
+      )}
+
+      {/* MCB zone */}
+      <rect
+        x="420" y="145" width="110" height="110" rx="6"
+        fill={placed.has('mcb') ? '#dcfce7' : '#f1f5f9'}
+        stroke={placed.has('mcb') ? '#22c55e' : '#cbd5e1'}
+        strokeWidth="2" strokeDasharray={placed.has('mcb') ? '0' : '5 3'}
+        style={{ cursor: placed.has('mcb') ? 'default' : 'pointer' }}
+        onClick={() => !placed.has('mcb') && onZoneClick('mcb')}
+      />
+      {placed.has('mcb') ? (
+        <g>
+          <rect x="425" y="150" width="98" height="98" rx="4" fill="white" stroke="#16a34a" strokeWidth="1.5" />
+          <text x="474" y="176" textAnchor="middle" fontSize={14}>🛡️</text>
+          <text x="474" y="194" textAnchor="middle" fontSize={8} fill="#15803d" fontWeight="700">MCB PANEL</text>
+          {/* Breakers */}
+          {[0, 1, 2, 3].map(i => (
+            <rect key={i} x={434 + i * 22} y={200} width={16} height={36} rx={2}
+              fill={i < 2 ? '#22c55e' : '#f59e0b'} />
+          ))}
+        </g>
+      ) : (
+        <text x="475" y="205" textAnchor="middle" fontSize={9} fill="#94a3b8">+ MCB Panel</text>
+      )}
+
+      {/* ── Wires ── */}
+      {renderWires()}
+
+      {/* ── Appliances ── */}
+
+      {/* Bulb */}
+      <g>
+        {bulbOn && <ellipse cx="630" cy="155" rx="28" ry="28" fill="url(#bulbGlow)" opacity="0.8" />}
+        <ellipse cx="630" cy="162" rx="16" ry="20" fill={bulbOn ? '#fef08a' : '#e2e8f0'} stroke="#94a3b8" strokeWidth="1.5" />
+        <rect x="624" y="182" width="12" height="8" rx="2" fill="#9ca3af" />
+        <line x1="630" y1="140" x2="630" y2="142" stroke="#94a3b8" strokeWidth="2" />
+        {bulbOn && (
+          <>
+            <line x1="630" y1="128" x2="630" y2="134" stroke="#fbbf24" strokeWidth="2" />
+            <line x1="618" y1="132" x2="622" y2="136" stroke="#fbbf24" strokeWidth="2" />
+            <line x1="642" y1="132" x2="638" y2="136" stroke="#fbbf24" strokeWidth="2" />
+          </>
+        )}
+        <text x="630" y="215" textAnchor="middle" fontSize={9} fill="#64748b" fontWeight="600">BULB</text>
+        {/* Wire indicators */}
+        <g>
+          {bulbWires.map((t, i) => (
+            <circle key={t} cx={614 + i * 9} cy={230} r={4} fill={WIRE_COLORS[t]} />
+          ))}
+        </g>
+      </g>
+
+      {/* Fan */}
+      <g style={{ transformOrigin: '700px 172px' }}>
+        <circle cx="700" cy="172" r="22" fill={fanOn ? '#dbeafe' : '#f1f5f9'} stroke="#94a3b8" strokeWidth="1.5" />
+        {[0, 90, 180, 270].map((angle, i) => (
+          <ellipse
+            key={i}
+            cx={700 + Math.cos((angle * Math.PI) / 180) * 10}
+            cy={172 + Math.sin((angle * Math.PI) / 180) * 10}
+            rx={8} ry={4}
+            fill={fanOn ? '#93c5fd' : '#cbd5e1'}
+            transform={`rotate(${angle}, 700, 172)`}
+          >
+            {fanOn && <animateTransform attributeName="transform" type="rotate" from={`${angle} 700 172`} to={`${angle + 360} 700 172`} dur="0.6s" repeatCount="indefinite" />}
+          </ellipse>
+        ))}
+        <circle cx="700" cy="172" r="4" fill="#64748b" />
+        <text x="700" y="215" textAnchor="middle" fontSize={9} fill="#64748b" fontWeight="600">FAN</text>
+        <g>
+          {fanWires.map((t, i) => (
+            <circle key={t} cx={684 + i * 9} cy={230} r={4} fill={WIRE_COLORS[t]} />
+          ))}
+        </g>
+      </g>
+
+      {/* Socket */}
+      <g>
+        {socketOn && <ellipse cx="680" cy="310" rx="22" ry="22" fill="url(#socketGlow)" opacity="0.7" />}
+        <rect x="660" y="290" width="40" height="40" rx="5" fill={socketOn ? '#fff7ed' : '#f1f5f9'} stroke="#94a3b8" strokeWidth="1.5" />
+        <circle cx="673" cy="305" r="4" fill={socketOn ? '#fb923c' : '#9ca3af'} />
+        <circle cx="687" cy="305" r="4" fill={socketOn ? '#fb923c' : '#9ca3af'} />
+        <rect x="677" y="314" width="6" height="8" rx="1" fill={socketOn ? '#fb923c' : '#9ca3af'} />
+        <text x="680" y="350" textAnchor="middle" fontSize={9} fill="#64748b" fontWeight="600">SOCKET</text>
+        <g>
+          {socketWires.map((t, i) => (
+            <circle key={t} cx={664 + i * 9} cy={360} r={4} fill={WIRE_COLORS[t]} />
+          ))}
+        </g>
+      </g>
+
+      {/* ── Connection Nodes ── */}
+      {placed.has('meter') && renderNode('meter_in', 'IN')}
+      {placed.has('meter') && renderNode('meter_out', 'OUT')}
+      {placed.has('switch') && renderNode('switch_in', 'IN')}
+      {placed.has('switch') && renderNode('switch_out', 'OUT')}
+      {placed.has('mcb') && renderNode('mcb_in', 'IN')}
+      {placed.has('mcb') && renderNode('mcb_bulb', '→💡')}
+      {placed.has('mcb') && renderNode('mcb_fan', '→🌀')}
+      {placed.has('mcb') && renderNode('mcb_socket', '→🔌')}
+      {renderNode('pole_out', 'OUT')}
+      {renderNode('bulb_in', 'IN')}
+      {renderNode('fan_in', 'IN')}
+      {renderNode('socket_in', 'IN')}
+
+      {/* ── Spark on invalid connection ── */}
+
+      {/* ── Legend ── */}
+      <g>
+        <rect x="136" y="410" width="160" height="60" rx="6" fill="white" fillOpacity="0.9" stroke="#e2e8f0" strokeWidth="1" />
+        <text x="216" y="427" textAnchor="middle" fontSize={9} fill="#64748b" fontWeight="700">WIRE LEGEND</text>
+        {(['phase', 'neutral', 'earth'] as WireType[]).map((t, i) => (
+          <g key={t}>
+            <line x1="148" y1={440 + i * 12} x2="162" y2={440 + i * 12} stroke={WIRE_COLORS[t]} strokeWidth={3} strokeLinecap="round" />
+            <text x="168" y={444 + i * 12} fontSize={9} fill="#475569">{WIRE_LABELS[t]}</text>
+          </g>
+        ))}
+      </g>
+    </svg>
+  );
 };
 
-/* Step 2: Main Isolator Switch — on interior left wall, further inside */
-const buildStep2 = (scene: THREE.Scene) => {
-  // Red casing
-  const sw = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2.0, 1.1), new THREE.MeshStandardMaterial({ color: 0xbb2020, roughness: 0.5 }));
-  sw.position.set(-7.6, 3.5, -2.5);
-  scene.add(sw);
-  // Yellow lever handle
-  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.0, 0.25), new THREE.MeshStandardMaterial({ color: 0xffd700 }));
-  lever.position.set(-7.35, 4.2, -2.5);
-  scene.add(lever);
-  // ON indicator
-  const led = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), new THREE.MeshStandardMaterial({ color: 0x22dd44 }));
-  led.position.set(-7.35, 3.0, -2.5);
-  scene.add(led);
-  // Short wire: meter → switch
-  addWire(scene, [
-    new THREE.Vector3(-8.0, 3.5, -1),
-    new THREE.Vector3(-7.8, 3.5, -2.5),
-  ], 0xddaa00, 0.07);
-};
-
-/* Step 3: MCB Distribution Panel — on back-left wall interior */
-const buildStep3 = (scene: THREE.Scene) => {
-  // Main box (dark enclosure)
-  const enclosure = new THREE.Mesh(new THREE.BoxGeometry(0.6, 4.0, 3.2), new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.2 }));
-  enclosure.position.set(-7.2, 3.8, -3.6);
-  scene.add(enclosure);
-  // Panel face
-  const face = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.5, 2.8), new THREE.MeshStandardMaterial({ color: 0x334155 }));
-  face.position.set(-6.9, 3.8, -3.6);
-  scene.add(face);
-  // Label strip
-  const lbl = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.3, 2.6), new THREE.MeshStandardMaterial({ color: 0xffd700 }));
-  lbl.position.set(-6.88, 5.4, -3.6);
-  scene.add(lbl);
-  // MCB breakers in a row
-  const cols = [0x22c55e, 0x22c55e, 0xf59e0b, 0xf59e0b, 0x3b82f6, 0x3b82f6];
-  for (let i = 0; i < 6; i++) {
-    const br = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.9, 0.35), new THREE.MeshStandardMaterial({ color: cols[i] }));
-    br.position.set(-6.88, 3.6, -4.1 + i * 0.45);
-    scene.add(br);
-  }
-  // Wire: switch → MCB
-  addWire(scene, [
-    new THREE.Vector3(-7.6, 3.5, -2.5),
-    new THREE.Vector3(-7.6, 3.5, -3.6),
-    new THREE.Vector3(-7.2, 3.5, -3.6),
-  ], 0xddaa00, 0.07);
-};
-
-/* Step 4: 3-Wire system — Phase, Neutral, Earth */
-const buildStep4 = (scene: THREE.Scene) => {
-  const wireData = [
-    { col: 0xcc2222, label: 'Phase', y: 7.2 },
-    { col: 0x2255cc, label: 'Neutral', y: 7.0 },
-    { col: 0x229944, label: 'Earth', y: 6.8 },
-  ];
-  wireData.forEach(w => {
-    addWire(scene, [
-      new THREE.Vector3(-6.9, w.y, -3.6),
-      new THREE.Vector3(-3, w.y, -3.5),
-      new THREE.Vector3(0, w.y, -3.5),
-      new THREE.Vector3(6, w.y, -3.5),
-    ], w.col, 0.06);
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), new THREE.MeshStandardMaterial({ color: w.col }));
-    dot.position.set(6.3, w.y, -3.5);
-    scene.add(dot);
-  });
-};
-
-const BUILDERS = [buildStep0, buildStep1, buildStep2, buildStep3, buildStep4];
+// ─────────────────────────────────────────────
+// Main Level Component
+// ─────────────────────────────────────────────
 
 export const Level5House = () => {
-  const containerRef = useRef<HTMLDivElement>(null);
   const { setVoltMessage, setLevelComplete, addScore, addStar } = useGameStore();
-  const [step, setStep] = useState(0);
-  const [showWireSummary, setShowWireSummary] = useState(false);
-  const sceneRef = useRef<THREE.Scene | null>(null);
+
+  const [placed, setPlaced] = useState<Set<ComponentId>>(new Set());
+  const [wires, setWires] = useState<Wire[]>([]);
+  const [selectedTool, setSelectedTool] = useState<ComponentId | null>(null);
+  const [selectedWire, setSelectedWire] = useState<WireType | null>(null);
+  const [pendingFrom, setPendingFrom] = useState<NodeId | null>(null);
+  const [hoverNode, setHoverNode] = useState<NodeId | null>(null);
+  const [feedback, setFeedback] = useState('');
+  const [feedbackType, setFeedbackType] = useState<'ok' | 'warn' | 'error'>('ok');
+  const [sparkNode, setSparkNode] = useState<NodeId | null>(null);
+  const [showCompletion, setShowCompletion] = useState(false);
+  const [activeInfo, setActiveInfo] = useState<ComponentId | null>(null);
+
+  const allPlaced = placed.size === 3;
+
+  const mainChainDone =
+    wires.some(w => (w.from === 'pole_out' && w.to === 'meter_in') || (w.from === 'meter_in' && w.to === 'pole_out')) &&
+    wires.some(w => (w.from === 'meter_out' && w.to === 'switch_in') || (w.from === 'switch_in' && w.to === 'meter_out')) &&
+    wires.some(w => (w.from === 'switch_out' && w.to === 'mcb_in') || (w.from === 'mcb_in' && w.to === 'switch_out'));
+
+  const applianceWires = (node: NodeId, target: NodeId) =>
+    (['phase', 'neutral', 'earth'] as WireType[]).every(t =>
+      wires.some(w =>
+        ((w.from === node && w.to === target) || (w.from === target && w.to === node)) &&
+        w.wireType === t
+      )
+    );
+
+  const bulbComplete = applianceWires('mcb_bulb', 'bulb_in');
+  const fanComplete = applianceWires('mcb_fan', 'fan_in');
+  const socketComplete = applianceWires('mcb_socket', 'socket_in');
+
+  const powered = mainChainDone && (bulbComplete || fanComplete || socketComplete);
+  const levelComplete = mainChainDone && bulbComplete && fanComplete && socketComplete;
+
+  const showFeedback = (msg: string, type: 'ok' | 'warn' | 'error' = 'ok') => {
+    setFeedback(msg);
+    setFeedbackType(type);
+    setTimeout(() => setFeedback(''), 3500);
+  };
 
   useEffect(() => {
-    setVoltMessage(STEPS[0].voltMsg);
-    if (!containerRef.current) return;
-
-    const { scene, camera, renderer, controls, cleanup } = initBasicScene(containerRef.current);
-    sceneRef.current = scene;
-
-    scene.background = new THREE.Color(0xd0eaf8);
-    scene.fog = new THREE.FogExp2(0xd0eaf8, 0.012);
-    camera.position.set(0, 10, 24);
-    camera.fov = 52;
-    camera.updateProjectionMatrix();
-    controls.target.set(0, 4, 0);
-
-    // Grass
-    const grass = new THREE.Mesh(new THREE.PlaneGeometry(60, 40), new THREE.MeshStandardMaterial({ color: 0x7cc05a, roughness: 0.9 }));
-    grass.rotation.x = -Math.PI / 2;
-    grass.position.y = -0.15;
-    scene.add(grass);
-
-    // ── Modern house ──
-    // Concrete floor slab
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(16, 0.4, 9), new THREE.MeshStandardMaterial({ color: 0xd8cfc0, roughness: 0.7 }));
-    slab.position.set(0, 0, 0);
-    scene.add(slab);
-
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0xf7f3ee, roughness: 0.55, metalness: 0.02 });
-    const concreteMat = new THREE.MeshStandardMaterial({ color: 0xd5c8ba, roughness: 0.7 });
-    const glassMat = new THREE.MeshStandardMaterial({ color: 0x8ec8e8, transparent: true, opacity: 0.35, metalness: 0.2 });
-
-    const addBox = (w: number, h: number, d: number, x: number, y: number, z: number, mat = wallMat) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-      m.position.set(x, y, z);
-      m.castShadow = true;
-      m.receiveShadow = true;
-      scene.add(m);
-      return m;
-    };
-
-    // Walls
-    addBox(16, 7.5, 0.4, 0, 4.05, -4.2); // back wall
-    addBox(0.4, 7.5, 9, -8, 4.05, 0);    // left wall
-    addBox(0.4, 7.5, 9, 8, 4.05, 0);     // right wall
-    addBox(3, 7.5, 0.35, -2.5, 4.05, -0.5, concreteMat); // interior divider L
-    addBox(3, 7.5, 0.35, 3.5, 4.05, -0.5, concreteMat);  // interior divider R
-
-    // FLAT modern roof — with slight overhang
-    addBox(17.5, 0.5, 10.5, 0, 8.05, 0, new THREE.MeshStandardMaterial({ color: 0x607080, roughness: 0.5, metalness: 0.1 }));
-    // Parapet walls (low walls on roof perimeter)
-    addBox(17.6, 0.8, 0.25, 0, 8.7, -5.1, new THREE.MeshStandardMaterial({ color: 0x777060, roughness: 0.6 }));
-    addBox(17.6, 0.8, 0.25, 0, 8.7, 5.1, new THREE.MeshStandardMaterial({ color: 0x777060, roughness: 0.6 }));
-
-    // Large modern windows (glass)
-    addBox(3.5, 2.8, 0.25, -5, 4.2, 4.4, glassMat); // front left window
-    addBox(3.5, 2.8, 0.25, 3, 4.2, 4.4, glassMat);  // front right window
-    // Window frames
-    addBox(3.7, 3.0, 0.15, -5, 4.2, 4.3, new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.2 }));
-    addBox(3.7, 3.0, 0.15, 3, 4.2, 4.3, new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.2 }));
-    // Window behind glass
-    addBox(3.4, 2.7, 0.25, -5, 4.2, 4.45, glassMat);
-    addBox(3.4, 2.7, 0.25, 3, 4.2, 4.45, glassMat);
-
-    // Front door
-    addBox(1.8, 3.5, 0.2, 0, 2.05, 4.4, new THREE.MeshStandardMaterial({ color: 0x3b5278, roughness: 0.3, metalness: 0.3 }));
-    // Door handle
-    addBox(0.08, 0.08, 0.2, 0.7, 2.0, 4.55, new THREE.MeshStandardMaterial({ color: 0xddbb44, metalness: 0.9, roughness: 0.1 }));
-
-    // Pathway
-    const path = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 6), new THREE.MeshStandardMaterial({ color: 0xc0b8a0, roughness: 0.9 }));
-    path.rotation.x = -Math.PI / 2;
-    path.position.set(0, -0.12, 7.5);
-    scene.add(path);
-
-    BUILDERS[0](scene);
-
-    let frameId: number;
-    const animate = () => {
-      frameId = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    return () => { cancelAnimationFrame(frameId); cleanup(); sceneRef.current = null; };
+    setVoltMessage('🏠 Level 5: Build the home wiring system! Place components and connect the wires.');
   }, []);
 
   useEffect(() => {
-    if (step === 0) return;
-    const scene = sceneRef.current;
-    if (!scene) return;
-    BUILDERS[step](scene);
-    setVoltMessage(STEPS[step].voltMsg);
-    if (step === BUILDERS.length - 1) {
-      // Don't auto-complete — show wire summary first
-      setShowWireSummary(true);
-      addScore(100);
-      addStar();
+    if (levelComplete && !showCompletion) {
+      setTimeout(() => {
+        setShowCompletion(true);
+        addScore(100);
+        addStar();
+        setLevelComplete(true);
+      }, 800);
     }
-  }, [step]);
+  }, [levelComplete]);
 
-  const currentStep = STEPS[step];
-
-  const handleComplete = () => {
-    setLevelComplete(true);
+  const handleToolSelect = (id: ComponentId) => {
+    if (placed.has(id)) {
+      setActiveInfo(id);
+      showFeedback(`${COMPONENT_INFO[id].icon} ${COMPONENT_INFO[id].tip}`, 'ok');
+      return;
+    }
+    setSelectedTool(selectedTool === id ? null : id);
+    setSelectedWire(null);
+    showFeedback(`Selected: ${COMPONENT_INFO[id].label}. Click its zone in the house to place it.`, 'ok');
   };
 
-  return (
-    <div className="w-full h-full relative">
-      <div ref={containerRef} className="absolute inset-0 z-0" />
+  const handleZoneClick = (id: ComponentId) => {
+    if (placed.has(id)) return;
+    if (selectedTool === id) {
+      setPlaced(prev => new Set(prev).add(id));
+      setSelectedTool(null);
+      showFeedback(`✅ ${COMPONENT_INFO[id].label} placed! ${COMPONENT_INFO[id].tip}`, 'ok');
+      setVoltMessage(`✅ ${COMPONENT_INFO[id].label} installed! ${allPlaced ? 'Now connect the wires!' : 'Keep placing components.'}`);
+    } else {
+      showFeedback(`👆 First select "${COMPONENT_INFO[id].label}" from the toolkit on the left!`, 'warn');
+    }
+  };
 
+  const handleNodeClick = useCallback((id: NodeId) => {
+    if (!selectedWire) return;
+    if (!pendingFrom) {
+      setPendingFrom(id);
+      showFeedback(`🔌 Starting from node "${id}". Now click the destination node.`, 'ok');
+    } else {
+      if (pendingFrom === id) {
+        setPendingFrom(null);
+        return;
+      }
+      const valid = isValidConnection(pendingFrom, id);
+      const alreadyExists = wires.some(
+        w => ((w.from === pendingFrom && w.to === id) || (w.from === id && w.to === pendingFrom)) && w.wireType === selectedWire
+      );
+      if (alreadyExists) {
+        showFeedback('⚠️ This wire already exists between those nodes.', 'warn');
+      } else if (valid) {
+        const newWire: Wire = {
+          id: `${pendingFrom}-${id}-${selectedWire}-${Date.now()}`,
+          from: pendingFrom,
+          to: id,
+          wireType: selectedWire,
+        };
+        setWires(prev => [...prev, newWire]);
+
+        // Check earth wire reminder
+        if (selectedWire === 'phase' && (id === 'bulb_in' || id === 'fan_in' || id === 'socket_in')) {
+          showFeedback('✅ Phase wire connected! Remember: you also need Neutral and Earth wires for safety!', 'ok');
+        } else if (selectedWire === 'neutral' && !wires.some(w => w.wireType === 'earth' && (w.to === id || w.from === id))) {
+          showFeedback('✅ Neutral wire connected! Don\'t forget the Earth wire — it prevents electric shocks!', 'ok');
+        } else {
+          showFeedback('✅ Wire connected successfully!', 'ok');
+        }
+      } else {
+        setSparkNode(id);
+        setTimeout(() => setSparkNode(null), 600);
+        showFeedback('❌ Invalid connection! Follow the sequence: Pole → Meter → Switch → MCB → Appliances', 'error');
+      }
+      setPendingFrom(null);
+    }
+  }, [selectedWire, pendingFrom, wires]);
+
+  const handleWireSelect = (w: WireType | null) => {
+    setSelectedWire(w);
+    setPendingFrom(null);
+    setSelectedTool(null);
+    if (w) {
+      const tips: Record<WireType, string> = {
+        phase: '🔴 Phase wire selected (240V Live). Connect: Pole→Meter→Switch→MCB→Appliances',
+        neutral: '🔵 Neutral wire selected (Return path). Connect each appliance back to MCB',
+        earth: '🟢 Earth wire selected (Safety). Essential! Prevents electrocution!',
+      };
+      showFeedback(tips[w], 'ok');
+    }
+  };
+
+  const resetWires = () => {
+    setWires([]);
+    setPendingFrom(null);
+    showFeedback('🔄 All wires cleared. Start fresh!', 'warn');
+  };
+
+  const progressSteps = [
+    { label: 'Meter placed', done: placed.has('meter') },
+    { label: 'Switch placed', done: placed.has('switch') },
+    { label: 'MCB placed', done: placed.has('mcb') },
+    { label: 'Main chain wired', done: mainChainDone },
+    { label: 'Appliances connected', done: bulbComplete || fanComplete || socketComplete },
+    { label: 'All appliances done', done: bulbComplete && fanComplete && socketComplete },
+  ];
+
+  return (
+    <div className="w-full h-full relative overflow-hidden" style={{ background: '#f0f9ff' }}>
+
+      {/* ── Left Toolkit ── */}
+      <div
+        className="absolute left-0 top-0 bottom-0 z-10 flex flex-col gap-3 p-3 pointer-events-auto overflow-y-auto"
+        style={{ width: 170, background: 'rgba(255,255,255,0.95)', borderRight: '2px solid #e2e8f0', boxShadow: '2px 0 16px rgba(0,0,0,0.08)' }}
+      >
+        <div className="text-center pt-10">
+          <div className="font-bold text-slate-700" style={{ fontSize: '0.8rem' }}>🔧 TOOLKIT</div>
+          <div className="text-slate-400 mt-0.5" style={{ fontSize: '0.68rem' }}>Click to select, then click zone</div>
+        </div>
+
+        <div className="h-px bg-slate-200" />
+
+        <div className="font-bold text-slate-500 text-center" style={{ fontSize: '0.72rem' }}>COMPONENTS</div>
+
+        {TOOLKIT_ITEMS.map(item => (
+          <motion.button
+            key={item.id}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
+            onClick={() => handleToolSelect(item.id)}
+            className="flex flex-col items-center gap-1 px-2 py-3 rounded-xl font-bold transition-all"
+            style={{
+              background: placed.has(item.id)
+                ? '#f0fdf4'
+                : selectedTool === item.id
+                ? `${item.color}18`
+                : '#f8fafc',
+              border: `2px solid ${placed.has(item.id) ? '#22c55e' : selectedTool === item.id ? item.color : '#e2e8f0'}`,
+              color: placed.has(item.id) ? '#15803d' : item.color,
+              fontSize: '0.78rem',
+              position: 'relative',
+              opacity: placed.has(item.id) ? 0.7 : 1,
+            }}
+          >
+            <span style={{ fontSize: '1.5rem' }}>{item.icon}</span>
+            <span style={{ lineHeight: 1.2, textAlign: 'center' }}>{item.label}</span>
+            {placed.has(item.id) && (
+              <span
+                className="absolute top-1 right-1 rounded-full font-bold text-white"
+                style={{ background: '#22c55e', fontSize: '0.6rem', padding: '1px 5px' }}
+              >
+                ✓ Placed
+              </span>
+            )}
+            {selectedTool === item.id && (
+              <motion.span
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ duration: 0.5, repeat: Infinity }}
+                className="absolute top-1 right-1 rounded-full font-bold text-white"
+                style={{ background: item.color, fontSize: '0.6rem', padding: '1px 5px' }}
+              >
+                Selected
+              </motion.span>
+            )}
+          </motion.button>
+        ))}
+
+        <div className="h-px bg-slate-200" />
+
+        {/* Wire types */}
+        {allPlaced && (
+          <>
+            <div className="font-bold text-slate-500 text-center" style={{ fontSize: '0.72rem' }}>WIRE TYPES</div>
+            {(['phase', 'neutral', 'earth'] as WireType[]).map(w => (
+              <button
+                key={w}
+                onClick={() => handleWireSelect(selectedWire === w ? null : w)}
+                className="flex items-center gap-2 px-2 py-2 rounded-xl font-bold transition-all"
+                style={{
+                  background: selectedWire === w ? `${WIRE_COLORS[w]}20` : '#f8fafc',
+                  border: `2px solid ${selectedWire === w ? WIRE_COLORS[w] : '#e2e8f0'}`,
+                  color: WIRE_COLORS[w],
+                  fontSize: '0.75rem',
+                }}
+              >
+                <div className="rounded-full flex-shrink-0" style={{ width: 10, height: 10, background: WIRE_COLORS[w] }} />
+                {WIRE_LABELS[w]}
+              </button>
+            ))}
+            {wires.length > 0 && (
+              <button
+                onClick={resetWires}
+                className="text-xs text-slate-400 hover:text-red-400 transition-colors"
+              >
+                🔄 Clear wires
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── Main SVG Diagram ── */}
+      <div
+        className="absolute inset-0 z-0"
+        style={{ left: 170, right: 'clamp(220px, 25vw, 300px)' }}
+      >
+        <HouseDiagram
+          placed={placed}
+          wires={wires}
+          pendingFrom={pendingFrom}
+          selectedWire={selectedWire}
+          hoverNode={hoverNode}
+          onNodeClick={handleNodeClick}
+          onNodeHover={setHoverNode}
+          onZoneClick={handleZoneClick}
+          powered={powered}
+        />
+      </div>
+
+      {/* ── Feedback Toast ── */}
+      <AnimatePresence>
+        {feedback && (
+          <motion.div
+            key={feedback}
+            initial={{ opacity: 0, y: -16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="absolute pointer-events-none z-30"
+            style={{ top: 60, left: '50%', transform: 'translateX(-50%)', width: 'min(420px, 55vw)' }}
+          >
+            <div
+              className="px-5 py-3 rounded-2xl font-medium text-center shadow-lg"
+              style={{
+                background:
+                  feedbackType === 'error' ? '#fee2e2'
+                  : feedbackType === 'warn' ? '#fff7ed'
+                  : '#f0fdf4',
+                border: `2px solid ${feedbackType === 'error' ? '#ef4444' : feedbackType === 'warn' ? '#f59e0b' : '#22c55e'}`,
+                color: feedbackType === 'error' ? '#991b1b' : feedbackType === 'warn' ? '#92400e' : '#166534',
+                fontSize: '0.85rem',
+              }}
+            >
+              {feedback}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Right Info Panel ── */}
       <div
         className="absolute right-3 top-14 bottom-3 z-10 flex flex-col gap-3 pointer-events-auto overflow-y-auto"
         style={{ width: 'clamp(215px, 24vw, 295px)', paddingBottom: '0.25rem' }}
       >
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={step}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.3 }}
-          >
-            <InfoCard
-              title={currentStep.title}
-              icon={currentStep.icon}
-              colorClass={
-                step === 0 ? 'from-blue-700 to-blue-500'
-                : step === 1 ? 'from-violet-700 to-violet-500'
-                : step === 2 ? 'from-red-700 to-red-500'
-                : step === 3 ? 'from-emerald-700 to-emerald-500'
-                : 'from-amber-600 to-yellow-500'
-              }
-            >
-              <p className="leading-snug" style={{ whiteSpace: 'pre-line' }}>{currentStep.info}</p>
-            </InfoCard>
-          </motion.div>
-        </AnimatePresence>
+        <InfoCard title="Home Wiring" icon="🏠" colorClass="from-emerald-700 to-emerald-500">
+          <p><strong>Path:</strong> Pole → Meter → Switch → MCB → Appliances</p>
+          <p><strong>3 Wires:</strong> Phase (🔴 live), Neutral (🔵 return), Earth (🟢 safety)</p>
+          <p><strong>Earth</strong> is critical — it diverts fault current and prevents electrocution!</p>
+        </InfoCard>
 
+        {/* Progress */}
         <div className="game-panel">
-          <h3 className="font-display font-bold text-slate-700 mb-3" style={{ fontSize: '0.92rem' }}>
-            Electricity Path
+          <h3 className="font-bold text-slate-700 mb-2" style={{ fontSize: '0.88rem' }}>
+            📋 Mission Progress
           </h3>
-          <div className="flex justify-between mb-3">
-            {STEPS.map((s, i) => (
-              <div key={i} className="flex flex-col items-center gap-1">
-                <div
-                  className="rounded-full flex items-center justify-center font-display font-bold transition-all"
-                  style={{
-                    width: 30, height: 30, fontSize: '0.78rem',
-                    background: i < step ? '#059669' : i === step ? s.color : '#e2e8f0',
-                    color: i <= step ? 'white' : '#94a3b8',
-                    boxShadow: i === step ? `0 0 12px ${s.color}88` : 'none',
-                  }}
-                >
-                  {i < step ? '✓' : i + 1}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-1.5 mb-3 px-2 py-1.5 rounded-lg" style={{ background: '#f8fafc' }}>
-            {['🔌', '📊', '🔴', '🛡️', '⚡'].map((icon, i) => (
-              <React.Fragment key={i}>
-                <span style={{ fontSize: '0.95rem', opacity: i <= step ? 1 : 0.25 }}>{icon}</span>
-                {i < 4 && <span style={{ fontSize: '0.7rem', color: i < step ? '#ffd700' : '#cbd5e1' }}>→</span>}
-              </React.Fragment>
-            ))}
-          </div>
-
-          {step < STEPS.length - 1 ? (
-            <motion.button
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={() => setStep(s => s + 1)}
-              className="w-full py-2.5 rounded-xl font-display font-bold text-white shadow-md"
-              style={{
-                background: `linear-gradient(135deg, ${currentStep.color}, ${currentStep.color}bb)`,
-                fontSize: '1rem',
-                boxShadow: `0 4px 14px ${currentStep.color}44`,
-              }}
-            >
-              Next Step ➡
-            </motion.button>
-          ) : (
-            <div className="text-center py-2 rounded-xl font-display font-bold" style={{ background: '#f0fdf4', color: '#059669', fontSize: '0.88rem' }}>
-              ⭐ All 5 steps complete!
-            </div>
-          )}
-        </div>
-
-        {/* Wire summary — shown on last step before level complete */}
-        <AnimatePresence>
-          {showWireSummary && (
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="game-panel"
-              style={{ border: '2px solid #fbbf24' }}
-            >
-              <h4 className="font-display font-bold text-slate-700 mb-2" style={{ fontSize: '0.92rem' }}>
-                🔴🔵🟢 3-Wire System
-              </h4>
-              {[
-                { bg: '#fee2e2', dot: '#dc2626', text: 'PHASE — 240V Live!', sub: 'Never touch this wire!', textCol: '#991b1b' },
-                { bg: '#dbeafe', dot: '#2563eb', text: 'NEUTRAL — Return Path', sub: 'Completes the circuit safely', textCol: '#1e40af' },
-                { bg: '#dcfce7', dot: '#16a34a', text: 'EARTH — Safety Ground', sub: 'Diverts fault current', textCol: '#15803d' },
-              ].map((w) => (
-                <div key={w.text} className="flex items-start gap-2 rounded-xl px-2.5 py-2 mb-1.5" style={{ background: w.bg }}>
-                  <div className="rounded-full flex-shrink-0 mt-0.5" style={{ width: 13, height: 13, background: w.dot, boxShadow: `0 0 6px ${w.dot}` }} />
-                  <div>
-                    <span className="font-bold" style={{ color: w.textCol, fontSize: '0.82rem' }}>{w.text}</span>
-                    <p style={{ color: w.textCol, fontSize: '0.72rem', opacity: 0.75 }}>{w.sub}</p>
-                  </div>
-                </div>
-              ))}
-
-              <div className="px-3 py-2 rounded-xl mt-2 mb-3" style={{ background: '#fefce8', border: '1.5px solid #fde047' }}>
-                <p className="font-bold text-amber-700" style={{ fontSize: '0.78rem' }}>
-                  💡 Each wire runs from the MCB panel to every socket and light fitting in your home!
-                </p>
-              </div>
-
-              <motion.button
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.96 }}
-                onClick={handleComplete}
-                className="w-full py-3 rounded-xl font-display font-bold text-white"
+          {progressSteps.map((s, i) => (
+            <div key={i} className="flex items-center gap-2 mb-1.5">
+              <div
+                className="rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold"
                 style={{
-                  background: 'linear-gradient(135deg,#f59e0b,#fbbf24)',
-                  fontSize: '1rem',
-                  boxShadow: '0 4px 14px rgba(245,158,11,0.4)',
+                  width: 20, height: 20, fontSize: '0.65rem',
+                  background: s.done ? '#22c55e' : '#e2e8f0',
+                  color: s.done ? 'white' : '#94a3b8',
                 }}
               >
-                🔌 Wire the House →
+                {s.done ? '✓' : i + 1}
+              </div>
+              <span
+                className="font-medium"
+                style={{ fontSize: '0.78rem', color: s.done ? '#166534' : '#94a3b8' }}
+              >
+                {s.label}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Wire status per appliance */}
+        {placed.has('mcb') && (
+          <div className="game-panel">
+            <h3 className="font-bold text-slate-700 mb-2" style={{ fontSize: '0.88rem' }}>
+              🔌 Appliance Wiring
+            </h3>
+            {[
+              { label: '💡 Bulb', done: bulbComplete, from: 'mcb_bulb' as NodeId, to: 'bulb_in' as NodeId },
+              { label: '🌀 Fan', done: fanComplete, from: 'mcb_fan' as NodeId, to: 'fan_in' as NodeId },
+              { label: '🔌 Socket', done: socketComplete, from: 'mcb_socket' as NodeId, to: 'socket_in' as NodeId },
+            ].map(appliance => {
+              const connected = (['phase', 'neutral', 'earth'] as WireType[]).filter(t =>
+                wires.some(w =>
+                  ((w.from === appliance.from && w.to === appliance.to) || (w.from === appliance.to && w.to === appliance.from)) &&
+                  w.wireType === t
+                )
+              );
+              return (
+                <div key={appliance.label} className="mb-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-slate-600" style={{ fontSize: '0.8rem' }}>{appliance.label}</span>
+                    {appliance.done
+                      ? <span className="text-green-600 font-bold text-xs">✅ Ready</span>
+                      : <span className="text-slate-400 text-xs">{connected.length}/3 wires</span>
+                    }
+                  </div>
+                  <div className="flex gap-1">
+                    {(['phase', 'neutral', 'earth'] as WireType[]).map(t => (
+                      <div
+                        key={t}
+                        className="rounded flex-1 h-2"
+                        style={{
+                          background: connected.includes(t) ? WIRE_COLORS[t] : '#e2e8f0',
+                          opacity: connected.includes(t) ? 1 : 0.4,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  {!connected.includes('earth') && connected.length > 0 && !appliance.done && (
+                    <p className="text-amber-600 font-bold mt-0.5" style={{ fontSize: '0.7rem' }}>
+                      ⚠️ No earth wire! Risk of shock!
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Status badge */}
+        {powered && (
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="game-panel text-center"
+            style={{ border: '2px solid #22c55e', background: '#f0fdf4' }}
+          >
+            <div style={{ fontSize: '2rem' }}>⚡💡</div>
+            <p className="font-bold text-green-700 mt-1" style={{ fontSize: '0.9rem' }}>
+              House is powered!
+            </p>
+            <p className="text-green-600" style={{ fontSize: '0.75rem' }}>
+              {levelComplete ? 'All appliances working!' : 'Connect remaining appliances!'}
+            </p>
+          </motion.div>
+        )}
+      </div>
+
+      {/* ── Completion Modal ── */}
+      <AnimatePresence>
+        {showCompletion && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="absolute inset-0 z-50 flex items-center justify-center pointer-events-auto"
+            style={{ background: 'rgba(0,0,0,0.25)', backdropFilter: 'blur(2px)' }}
+          >
+            <motion.div
+              initial={{ scale: 0.85, y: 30 }}
+              animate={{ scale: 1, y: 0 }}
+              className="flex flex-col items-center gap-4 px-8 py-7 rounded-3xl"
+              style={{
+                background: 'white',
+                boxShadow: '0 12px 50px rgba(0,0,0,0.2)',
+                border: '3px solid #22c55e',
+                maxWidth: 440,
+                width: '90%',
+              }}
+            >
+              <div style={{ fontSize: '3.5rem' }}>🏠⭐✅</div>
+              <h2 className="font-bold text-slate-800 text-center" style={{ fontSize: '1.35rem' }}>
+                House Fully Wired!
+              </h2>
+              <div className="w-full space-y-2">
+                {[
+                  { icon: '📊', label: 'Electric Meter', desc: 'Tracks your kWh usage', color: '#8b5cf6' },
+                  { icon: '🔴', label: 'Main Switch', desc: 'Isolates all power instantly', color: '#ef4444' },
+                  { icon: '🛡️', label: 'MCB Panel', desc: 'Protects each circuit', color: '#22c55e' },
+                  { icon: '🔴🔵🟢', label: '3-Wire System', desc: 'Phase, Neutral & Earth', color: '#f59e0b' },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl"
+                    style={{ background: `${item.color}12`, border: `1.5px solid ${item.color}33` }}>
+                    <span style={{ fontSize: '1.2rem' }}>{item.icon}</span>
+                    <div>
+                      <p className="font-bold" style={{ color: item.color, fontSize: '0.85rem' }}>{item.label}</p>
+                      <p className="text-slate-500" style={{ fontSize: '0.75rem' }}>{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl px-4 py-2.5 w-full" style={{ background: '#fef9c3', border: '2px solid #fde047' }}>
+                <p className="font-bold text-amber-700 text-center" style={{ fontSize: '0.82rem' }}>
+                  💡 Safety Rule: Always connect Earth wire before turning on power!
+                </p>
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setShowCompletion(false)}
+                className="px-8 py-3 rounded-2xl font-bold text-white"
+                style={{
+                  background: 'linear-gradient(135deg,#22c55e,#16a34a)',
+                  fontSize: '1.05rem',
+                  boxShadow: '0 4px 16px rgba(34,197,94,0.4)',
+                }}
+              >
+                Continue →
               </motion.button>
             </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
