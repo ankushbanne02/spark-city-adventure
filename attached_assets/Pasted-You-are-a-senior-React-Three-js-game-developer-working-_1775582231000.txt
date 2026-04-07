@@ -1,0 +1,182 @@
+You are a **senior React + Three.js game developer** working on:
+
+**Spark City Adventure – Level 4 (Substation)**
+
+---
+
+## 🚨 IMPORTANT
+
+* DO NOT remove existing components
+* Enhance interactivity and learning
+* You CAN modify logic (breaker + voltage flow)
+
+---
+
+## 🎯 GOAL
+
+Transform Level 4 from:
+❌ Tap-based animation
+
+Into:
+✅ Interactive learning simulation
+
+---
+
+## 🔥 FEATURE 1: MCQ INTRO (BEFORE SIMULATION)
+
+Before user interacts:
+
+Show modal:
+
+"What happens if 132 kV is sent directly to homes?"
+
+Options:
+
+* Safe for appliances
+* ⚡ Appliances will burn (correct)
+* No effect
+
+---
+
+### Behavior:
+
+* If wrong → show feedback
+* Then allow simulation
+
+---
+
+## ⚡ FEATURE 2: REPLACE AUTO VOLTAGE DROP WITH CONTROL
+
+REMOVE:
+
+* Automatic interval voltage reduction
+
+ADD:
+
+👉 Voltage Slider / Dial
+
+User controls voltage from:
+132 kV → 11 kV → 230 V
+
+---
+
+### Effects:
+
+* > 50 kV → danger (red)
+* 11 kV → distribution level
+* 230 V → safe
+
+---
+
+## 🏠 FEATURE 3: HOUSE SIMULATION
+
+Add a small house with bulb:
+
+### Behavior:
+
+* 132 kV → explosion effect ⚡💥
+* 11 kV → flicker (unstable)
+* 230 V → stable glow 💡
+
+---
+
+## 🔧 FEATURE 4: TRANSFORMER COIL INTERACTION
+
+Let user drag coil turns:
+
+* Increase turns → increase voltage
+* Decrease turns → decrease voltage
+
+Show formula visually:
+V₁/V₂ = N₁/N₂
+
+---
+
+## 🔌 FEATURE 5: INTERACTIVE BREAKER SYSTEM
+
+Change breaker logic:
+
+Instead of:
+Click → auto flow
+
+Make it:
+
+* User must:
+
+  1. Set correct voltage
+  2. Then close breaker
+
+If wrong:
+❌ Show warning
+
+---
+
+## 🎮 FEATURE 6: FAILURE-BASED LEARNING
+
+If user:
+
+* Sends high voltage to house
+
+Show:
+
+* Sparks
+* Explosion
+* Message:
+  "This is why we step down voltage!"
+
+---
+
+## 🎨 FEATURE 7: VISUAL FEEDBACK
+
+Add:
+
+* Color-coded wires:
+
+  * Red → dangerous
+  * Yellow → medium
+  * Green → safe
+* Animated electricity intensity
+
+---
+
+## 🧠 KEEP EXISTING SYSTEM
+
+Keep:
+
+* Voltage meter
+* Explanation panel
+* Flow steps UI
+
+But trigger based on interaction, not automatic flow
+
+---
+
+## 🏁 FINAL EXPERIENCE
+
+User flow:
+
+1. Answer MCQ
+2. Try sending 132 kV → failure ⚡
+3. Adjust transformer
+4. Reduce voltage
+5. Power house successfully 💡
+
+---
+
+## 🎯 RESULT
+
+Make Level 4 feel like:
+
+🎮 Simulation + Experiment + Learning
+🧠 User understands WHY step-down is required
+⚡ Not just watching — actually discovering
+
+---
+
+Deliver:
+
+* Clean modular code
+* Smooth animations
+* No breaking UI
+
+---
