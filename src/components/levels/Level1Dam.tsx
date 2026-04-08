@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Environment } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/game-store';
@@ -227,11 +227,13 @@ export const Level1Dam = () => {
         camera={{ position: [-2, 10, 22], fov: 52 }}
         shadows
       >
-        <ambientLight intensity={0.55} />
-        <directionalLight position={[15, 18, 10]} intensity={1.3} castShadow shadow-mapSize={[2048, 2048]} />
+        <color attach="background" args={['#87ceeb']} />
+        <fog attach="fog" args={['#b0d8f0', 35, 80]} />
+        <ambientLight intensity={0.75} />
+        <directionalLight position={[15, 18, 10]} intensity={1.4} castShadow shadow-mapSize={[1024, 1024]} />
+        <hemisphereLight args={['#87ceeb', '#5a9a4a', 0.45]} />
         <pointLight position={[8.5, 5, 0.5]} color="#00aaff" intensity={generating ? 4 : 0} distance={16} />
         <pointLight position={[4.5, 4, 0.5]} color="#ffd700" intensity={turbineOn ? 2 : 0} distance={12} />
-        <Environment preset="sunset" />
         <OrbitControls enablePan={false} minDistance={8} maxDistance={26} maxPolarAngle={Math.PI / 2.1} />
 
         {/* Ground */}
