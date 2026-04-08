@@ -1,0 +1,156 @@
+You are a **senior React + Three.js simulation engineer** working on:
+
+**Spark City Adventure – Level 5 (Home Wiring Advanced Simulation)**
+
+---
+
+## 🚨 CRITICAL
+
+* KEEP existing 3D house exactly
+* KEEP current drag-drop + wiring system
+* DO NOT rebuild scene
+* ENHANCE realism, interactivity, and learning
+
+---
+
+## 🎯 GOAL
+
+Upgrade Level 5 into:
+
+👉 Realistic electrical home simulation lab
+
+---
+
+## 🔧 FEATURE 1: COMPONENT INTERACTION
+
+### Electric Meter
+
+* Add animated kWh reading
+* Rotate dial continuously
+
+### Main Switch
+
+* Click to toggle ON/OFF
+* OFF → stops electricity flow
+
+### MCB Panel
+
+* Each breaker clickable
+* Simulate trip/reset
+
+---
+
+## 🔴🔵🟢 FEATURE 2: REAL 3-WIRE BEHAVIOR
+
+Implement logic:
+
+* Phase → carries voltage
+* Neutral → completes circuit
+* Earth → only active during faults
+
+---
+
+### Rules:
+
+* Missing phase → no power
+* Missing neutral → incomplete circuit
+* Missing earth → unsafe condition
+
+---
+
+## ⚠️ FEATURE 3: FAULT SIMULATION
+
+Add:
+
+* Short circuit effect
+* Overload → MCB trips
+* No earth → shock warning
+
+---
+
+## 🏠 FEATURE 4: ROOM-LEVEL SYSTEM
+
+Inside house add:
+
+* Bulb (room 1)
+* Fan (room 2)
+* Socket (room 3)
+
+Each connected to different MCB breakers
+
+---
+
+## 🔌 FEATURE 5: BREAKER CONTROL
+
+Each MCB switch:
+
+* Controls one room
+* Can turn ON/OFF
+
+---
+
+## ⚡ FEATURE 6: DYNAMIC ELECTRICITY FLOW
+
+* Animate current based on connections
+* Stop flow if circuit incomplete
+
+---
+
+## 🎮 FEATURE 7: FREE MODE
+
+After completion:
+
+* Allow user to disconnect wires
+* Rewire system
+* Experiment freely
+
+---
+
+## 🧠 FEATURE 8: SMART LEARNING SYSTEM
+
+Show dynamic feedback:
+
+* "Neutral missing — circuit incomplete"
+* "Earth wire missing — dangerous condition"
+* "MCB tripped — overload detected"
+
+---
+
+## 🎨 FEATURE 9: VISUAL REALISM
+
+* Add connector joints at nodes
+* Slight wire sag effect
+* Add wall sockets
+* Add internal switchboard
+
+---
+
+## 🏁 FINAL EXPERIENCE
+
+User should:
+
+1. Place components
+2. Connect wires
+3. Control switches and MCB
+4. Handle faults
+5. Understand real electrical system
+
+---
+
+## 🎯 RESULT
+
+Make it feel like:
+
+🏠 Real electrician training simulator
+⚡ Deep learning through interaction
+🎮 High engagement + experimentation
+
+---
+
+Deliver:
+
+* Modular scalable code
+* No breaking existing logic
+* Only enhancements
+
+---
