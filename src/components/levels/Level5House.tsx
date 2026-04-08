@@ -1,1126 +1,1305 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { initBasicScene } from '../../utils/three-helpers';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/game-store';
 import { InfoCard } from '../GameUI';
 
-// ─────────────────────────────────────────────────────────────
-// Types & Constants
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────────────────────────────────────
 
-type ComponentId = 'meter' | 'switch' | 'mcb';
-type NodeId = 'pole' | 'meter' | 'switch' | 'mcb' | 'house';
-type WireType = 'phase' | 'neutral' | 'earth';
-
-const WIRE_META: Record<WireType, { color: string; three: number; name: string; label: string }> = {
-  phase:   { color: '#ef4444', three: 0xef4444, name: 'Phase',   label: 'Live 240V ⚠ Never touch!' },
-  neutral: { color: '#3b82f6', three: 0x3b82f6, name: 'Neutral', label: 'Return path to grid'       },
-  earth:   { color: '#22c55e', three: 0x22c55e, name: 'Earth',   label: 'Safety ground wire'        },
+/** Wire attachment points for each node (at ~component top) */
+const NODE_ATTACH: Record<string, [number, number, number]> = {
+  meter:  [-8.1, 5.0, -1.0],
+  switch: [-7.6, 5.0, -2.5],
+  mcb:    [-7.2, 6.2, -3.6],
+  house:  [ 0.0, 5.5,  0.0],
 };
 
-const ADJACENT: [NodeId, NodeId][] = [
-  ['pole',   'meter'],
-  ['meter',  'switch'],
-  ['switch', 'mcb'],
-  ['mcb',    'house'],
+/** The 3 sequential connections the user must make */
+const CONNECTION_FLOW = ['meter-switch', 'switch-mcb', 'mcb-house'] as const;
+
+/** Toolkit items */
+const TOOLKIT_ITEMS = [
+  { id: 'meter',  label: 'Electric Meter', sublabel: '240V Input',    icon: '📊', color: '#8b5cf6', bg: 'rgba(139,92,246,0.15)'  },
+  { id: 'switch', label: 'Main Switch',    sublabel: 'Isolator',      icon: '🔴', color: '#ef4444', bg: 'rgba(239,68,68,0.15)'   },
+  { id: 'mcb',    label: 'MCB Panel',      sublabel: 'Distribution',  icon: '🛡️', color: '#059669', bg: 'rgba(5,150,105,0.15)'   },
+  { id: 'wire',   label: 'Wire Tool',      sublabel: 'Connect nodes', icon: '〰️', color: '#22d3ee', bg: 'rgba(34,211,238,0.15)' },
 ];
 
-const USER_SEGMENTS: [NodeId, NodeId][] = [
-  ['meter',  'switch'],
-  ['switch', 'mcb'],
-  ['mcb',    'house'],
+const REQUIRED_ITEMS = ['meter', 'switch', 'mcb'];
+
+const STEP_EXPLANATIONS = [
+  {
+    title: 'Meter → Main Switch Connected!',
+    icon: '📊',
+    color: 'from-violet-700 to-violet-500',
+    info: 'The Electric Meter now feeds into the Main Isolator Switch via 3 wires: Phase (Red/240V live), Neutral (Blue/return path), and Earth (Green/safety ground). ALWAYS turn the Main Switch OFF before any electrical work!',
+    formula: '3-Wire System',
+    formulaNote: 'Phase + Neutral + Earth = Safe Circuit!',
+  },
+  {
+    title: 'Switch → MCB Panel Connected!',
+    icon: '🛡️',
+    color: 'from-emerald-700 to-emerald-500',
+    info: 'Power now enters the MCB Distribution Board. Each breaker protects a different room circuit. If a fault occurs the MCB trips in just 0.01 seconds — faster than a heartbeat — preventing fires and shocks!',
+    formula: 'Trip time: 0.01 s',
+    formulaNote: 'Faster than a heartbeat — fires prevented!',
+  },
+  {
+    title: '🏠 House Fully Wired!',
+    icon: '⚡',
+    color: 'from-amber-600 to-yellow-400',
+    info: 'All 3 wires now reach every room! Lights on, fans spin, appliances run safely. Remember: the Earth wire is NEVER optional — it diverts fault current safely to ground and can save your life!',
+    formula: 'P = V × I = 240 × I',
+    formulaNote: 'Every watt starts from the Utility Pole!',
+  },
 ];
 
-const NODE_ICONS: Record<NodeId, string> = {
-  pole:   '🗼',
-  meter:  '📊',
-  switch: '🔴',
-  mcb:    '🛡️',
-  house:  '🏠',
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED 3-D HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
-const NODE_LABELS: Record<NodeId, string> = {
-  pole:   'Utility Pole',
-  meter:  'Electric Meter',
-  switch: 'Main Switch',
-  mcb:    'MCB Panel',
-  house:  'House Circuit',
-};
-
-const COMPONENT_INFO: Record<ComponentId, { title: string; icon: string; tip: string }> = {
-  meter:  { icon: '📊', title: 'Electric Meter',  tip: '⚡ Counts every kWh! 1 kWh = 1000W for 1 hour.' },
-  switch: { icon: '🔴', title: 'Main Switch',      tip: '🔴 ALWAYS turn this OFF before any electrical work!' },
-  mcb:    { icon: '🛡️', title: 'MCB Panel',       tip: '🛡️ Breakers trip in 0.01s — faster than a heartbeat!' },
-};
-
-const WIRE_TIPS: Record<string, string> = {
-  'phase_meter_switch':   '⚠️ Phase wire carries live 240V — handle with extreme care!',
-  'phase_switch_mcb':     '⚡ Phase enters the MCB panel and splits to each room circuit.',
-  'phase_mcb_house':      '💡 Phase wire powers every socket and light in the house.',
-  'neutral_meter_switch': '↩️ Neutral returns current safely back to the grid.',
-  'neutral_switch_mcb':   '🔵 Neutral completes the circuit in every appliance.',
-  'neutral_mcb_house':    '✅ Both Phase + Neutral = a working 240V circuit!',
-  'earth_meter_switch':   '🟢 Earth wire protects against electric shock faults.',
-  'earth_switch_mcb':     '🌍 Earth diverts fault current safely to the ground.',
-  'earth_mcb_house':      '🛡️ All 3 wires connected — the house is safely wired!',
-};
-
-// Y-offsets so the 3 wire types sit beside each other
-const Y_OFFSETS: Record<WireType, number> = { phase: 0.12, neutral: 0, earth: -0.12 };
-
-// ─────────────────────────────────────────────────────────────
-// Wire paths (world-space, matched to Level5House scene)
-// ─────────────────────────────────────────────────────────────
-
-function getWirePath(from: NodeId, to: NodeId, wire: WireType): THREE.Vector3[] {
-  const yo = Y_OFFSETS[wire];
-  const paths: Record<string, THREE.Vector3[]> = {
-    pole_meter: [
-      new THREE.Vector3(-10, 11.5 + yo, 0),
-      new THREE.Vector3(-8.8, 9.5 + yo, -1),
-      new THREE.Vector3(-8.4, 7.5 + yo, -1),
-      new THREE.Vector3(-8.35, 4.5 + yo, -1),
-    ],
-    meter_switch: [
-      new THREE.Vector3(-8.0, 3.5 + yo, -1),
-      new THREE.Vector3(-7.8, 3.6 + yo, -1.8),
-      new THREE.Vector3(-7.7, 3.5 + yo, -2.5),
-    ],
-    switch_mcb: [
-      new THREE.Vector3(-7.6, 3.5 + yo, -2.5),
-      new THREE.Vector3(-7.4, 3.6 + yo, -3.1),
-      new THREE.Vector3(-7.2, 3.8 + yo, -3.6),
-    ],
-    mcb_house: [
-      new THREE.Vector3(-6.9, 7.0 + yo, -3.6),
-      new THREE.Vector3(-3, 7.0 + yo, -3.5),
-      new THREE.Vector3(0,   7.0 + yo, -3.5),
-      new THREE.Vector3(5,   7.0 + yo, -3.5),
-    ],
-  };
-  return paths[`${from}_${to}`] ?? [];
-}
-
-// ─────────────────────────────────────────────────────────────
-// Tube helper
-// ─────────────────────────────────────────────────────────────
-
-function addTube(
-  scene: THREE.Scene,
-  pts: THREE.Vector3[],
-  color: number,
-  r = 0.065,
-): THREE.Mesh {
-  const curve = new THREE.CatmullRomCurve3(pts);
-  const geo = new THREE.TubeGeometry(curve, 24, r, 7, false);
-  const mat = new THREE.MeshStandardMaterial({
-    color,
-    emissive: color,
-    emissiveIntensity: 0.45,
-    roughness: 0.4,
+/** Single colored wire tube between two points */
+const WireTube = ({
+  start, end, color, active, flash = false,
+}: {
+  start: [number,number,number]; end: [number,number,number];
+  color: string; active: boolean; flash?: boolean;
+}) => {
+  const matRef = useRef<THREE.MeshStandardMaterial>(null!);
+  const colorHex = useMemo(() => new THREE.Color(color), [color]);
+  const curve = useMemo(() => new THREE.CatmullRomCurve3([
+    new THREE.Vector3(...start),
+    new THREE.Vector3(
+      (start[0]+end[0])/2,
+      Math.max(start[1], end[1]) + 0.4,
+      (start[2]+end[2])/2,
+    ),
+    new THREE.Vector3(...end),
+  ]), [start, end]);
+  useFrame(({ clock }) => {
+    if (!matRef.current) return;
+    matRef.current.emissiveIntensity = flash
+      ? 0.6 + Math.sin(clock.getElapsedTime() * 18) * 0.5
+      : active ? 0.5 + Math.sin(clock.getElapsedTime() * 2.5) * 0.2 : 0;
   });
-  const mesh = new THREE.Mesh(geo, mat);
-  scene.add(mesh);
-  return mesh;
-}
-
-// ─────────────────────────────────────────────────────────────
-// Full scene builder (house geometry preserved exactly)
-// ─────────────────────────────────────────────────────────────
-
-function buildFullScene(
-  scene: THREE.Scene,
-  refs: Record<string, THREE.Object3D | null>,
-) {
-  // Grass
-  const grass = new THREE.Mesh(
-    new THREE.PlaneGeometry(60, 40),
-    new THREE.MeshStandardMaterial({ color: 0x7cc05a, roughness: 0.9 }),
+  return (
+    <mesh>
+      <tubeGeometry args={[curve, 22, 0.072, 8, false]} />
+      <meshStandardMaterial ref={matRef}
+        color={active ? colorHex : new THREE.Color('#888888')}
+        emissive={active ? colorHex : new THREE.Color('#000')}
+        emissiveIntensity={0} metalness={0.3} roughness={0.5} />
+    </mesh>
   );
-  grass.rotation.x = -Math.PI / 2;
-  grass.position.y = -0.15;
-  scene.add(grass);
+};
 
-  // Concrete slab
-  const slab = new THREE.Mesh(
-    new THREE.BoxGeometry(16, 0.4, 9),
-    new THREE.MeshStandardMaterial({ color: 0xd8cfc0, roughness: 0.7 }),
+/** Bundle of 3 coloured wires (phase/neutral/earth) for one connection segment */
+const WireBundle = ({
+  fromId, toId, active, flash = false,
+}: {
+  fromId: string; toId: string; active: boolean; flash?: boolean;
+}) => {
+  const s = NODE_ATTACH[fromId];
+  const e = NODE_ATTACH[toId];
+  const wires = [
+    { color: '#ef4444', yo:  0.10 }, // phase   — red
+    { color: '#3b82f6', yo:  0.00 }, // neutral — blue
+    { color: '#22c55e', yo: -0.10 }, // earth   — green
+  ];
+  return (
+    <>
+      {wires.map((w, i) => (
+        <WireTube key={i}
+          start={[s[0], s[1] + w.yo, s[2]]}
+          end={[e[0], e[1] + w.yo, e[2]]}
+          color={w.color} active={active} flash={flash} />
+      ))}
+    </>
   );
-  slab.position.set(0, 0, 0);
-  scene.add(slab);
+};
 
-  const wallMat     = new THREE.MeshStandardMaterial({ color: 0xf7f3ee, roughness: 0.55, metalness: 0.02 });
-  const concreteMat = new THREE.MeshStandardMaterial({ color: 0xd5c8ba, roughness: 0.7 });
-  const glassMat    = new THREE.MeshStandardMaterial({ color: 0x8ec8e8, transparent: true, opacity: 0.35, metalness: 0.2 });
-
-  const addBox = (w: number, h: number, d: number, x: number, y: number, z: number, mat = wallMat) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    m.position.set(x, y, z);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    scene.add(m);
-    return m;
-  };
-
-  // Walls
-  addBox(16, 7.5, 0.4, 0, 4.05, -4.2);                                                  // back wall
-  addBox(0.4, 7.5, 9, -8, 4.05, 0);                                                      // left wall
-  addBox(0.4, 7.5, 9,  8, 4.05, 0);                                                      // right wall
-  addBox(3, 7.5, 0.35, -2.5, 4.05, -0.5, concreteMat);                                   // interior divider L
-  addBox(3, 7.5, 0.35,  3.5, 4.05, -0.5, concreteMat);                                   // interior divider R
-
-  // Flat modern roof
-  addBox(17.5, 0.5, 10.5, 0, 8.05, 0,
-    new THREE.MeshStandardMaterial({ color: 0x607080, roughness: 0.5, metalness: 0.1 }));
-  // Parapet walls
-  addBox(17.6, 0.8, 0.25, 0, 8.7, -5.1,
-    new THREE.MeshStandardMaterial({ color: 0x777060, roughness: 0.6 }));
-  addBox(17.6, 0.8, 0.25, 0, 8.7,  5.1,
-    new THREE.MeshStandardMaterial({ color: 0x777060, roughness: 0.6 }));
-
-  // Large modern windows
-  addBox(3.5, 2.8, 0.25, -5, 4.2, 4.4, glassMat);
-  addBox(3.5, 2.8, 0.25,  3, 4.2, 4.4, glassMat);
-  // Window frames
-  addBox(3.7, 3.0, 0.15, -5, 4.2, 4.3,
-    new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.2 }));
-  addBox(3.7, 3.0, 0.15,  3, 4.2, 4.3,
-    new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.2 }));
-  addBox(3.4, 2.7, 0.25, -5, 4.2, 4.45, glassMat);
-  addBox(3.4, 2.7, 0.25,  3, 4.2, 4.45, glassMat);
-
-  // Front door
-  addBox(1.8, 3.5, 0.2, 0, 2.05, 4.4,
-    new THREE.MeshStandardMaterial({ color: 0x3b5278, roughness: 0.3, metalness: 0.3 }));
-  // Door handle
-  addBox(0.08, 0.08, 0.2, 0.7, 2.0, 4.55,
-    new THREE.MeshStandardMaterial({ color: 0xddbb44, metalness: 0.9, roughness: 0.1 }));
-
-  // Pathway
-  const path = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.5, 6),
-    new THREE.MeshStandardMaterial({ color: 0xc0b8a0, roughness: 0.9 }),
-  );
-  path.rotation.x = -Math.PI / 2;
-  path.position.set(0, -0.12, 7.5);
-  scene.add(path);
-
-  // ── Utility Pole (always visible) ──
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.22, 0.28, 13, 12),
-    new THREE.MeshStandardMaterial({ color: 0x5a3a20, roughness: 0.9 }),
-  );
-  pole.position.set(-10, 6.5, 0);
-  scene.add(pole);
-  const arm = new THREE.Mesh(
-    new THREE.BoxGeometry(3.0, 0.2, 0.2),
-    new THREE.MeshStandardMaterial({ color: 0x6a4a30 }),
-  );
-  arm.position.set(-10, 11.5, 0);
-  scene.add(arm);
-  [-0.8, 0.8].forEach(dx => {
-    const ins = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.12, 0.4, 8),
-      new THREE.MeshStandardMaterial({ color: 0x9090bb }),
-    );
-    ins.position.set(-10 + dx, 11.3, 0);
-    scene.add(ins);
-  });
-
-  // Service cable — pre-wired by utility (dim until circuit complete)
-  const serviceCable = addTube(scene, [
-    new THREE.Vector3(-10, 11.5, 0),
-    new THREE.Vector3(-8.8, 9.5, -1),
-    new THREE.Vector3(-8.4, 7.5, -1),
-    new THREE.Vector3(-8.35, 4.5, -1),
-  ], 0x555555, 0.06);
-  (serviceCable.material as THREE.MeshStandardMaterial).emissiveIntensity = 0;
-  refs['serviceCable'] = serviceCable;
-
-  // ── Electric Meter (hidden until placed) ──
-  const meterGroup = new THREE.Group();
-  const mPlate = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 3.4, 2.4),
-    new THREE.MeshStandardMaterial({ color: 0x2c3e50, metalness: 0.4 }),
-  );
-  mPlate.position.set(-8.35, 3.5, -1);
-  const mCasing = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 3.0, 2.0),
-    new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.3 }),
-  );
-  mCasing.position.set(-8.1, 3.5, -1);
-  const mLcd = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.6, 1.3),
-    new THREE.MeshStandardMaterial({ color: 0xc8f0d0, roughness: 0.2 }),
-  );
-  mLcd.position.set(-7.85, 3.8, -1);
-  const mDial = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.5, 0.5, 0.1, 20),
-    new THREE.MeshStandardMaterial({ color: 0xfafafa }),
-  );
-  mDial.rotation.z = Math.PI / 2;
-  mDial.position.set(-7.85, 3.0, -1);
-  const mNeedle = new THREE.Mesh(
-    new THREE.BoxGeometry(0.08, 0.45, 0.08),
-    new THREE.MeshStandardMaterial({ color: 0xcc3333 }),
-  );
-  mNeedle.position.set(-7.82, 3.0, -1);
-  mNeedle.rotation.x = Math.PI / 6;
-  const mStrip = new THREE.Mesh(
-    new THREE.BoxGeometry(0.1, 0.3, 1.8),
-    new THREE.MeshStandardMaterial({ color: 0xffd700 }),
-  );
-  mStrip.position.set(-7.85, 2.2, -1);
-  meterGroup.add(mPlate, mCasing, mLcd, mDial, mNeedle, mStrip);
-  meterGroup.visible = false;
-  scene.add(meterGroup);
-  refs['meter3d'] = meterGroup;
-
-  // ── Main Switch (hidden until placed) ──
-  const switchGroup = new THREE.Group();
-  const sw = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 2.0, 1.1),
-    new THREE.MeshStandardMaterial({ color: 0xbb2020, roughness: 0.5 }),
-  );
-  sw.position.set(-7.6, 3.5, -2.5);
-  const lever = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15, 1.0, 0.25),
-    new THREE.MeshStandardMaterial({ color: 0xffd700 }),
-  );
-  lever.position.set(-7.35, 4.2, -2.5);
-  const swLed = new THREE.Mesh(
-    new THREE.SphereGeometry(0.1, 8, 8),
-    new THREE.MeshStandardMaterial({ color: 0x22dd44, emissive: 0x22dd44, emissiveIntensity: 0.8 }),
-  );
-  swLed.position.set(-7.35, 3.0, -2.5);
-  switchGroup.add(sw, lever, swLed);
-  switchGroup.visible = false;
-  scene.add(switchGroup);
-  refs['switch3d'] = switchGroup;
-
-  // ── MCB Panel (hidden until placed) ──
-  const mcbGroup = new THREE.Group();
-  const mcbEnc = new THREE.Mesh(
-    new THREE.BoxGeometry(0.6, 4.0, 3.2),
-    new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.2 }),
-  );
-  mcbEnc.position.set(-7.2, 3.8, -3.6);
-  const mcbFace = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 3.5, 2.8),
-    new THREE.MeshStandardMaterial({ color: 0x334155 }),
-  );
-  mcbFace.position.set(-6.9, 3.8, -3.6);
-  const mcbLbl = new THREE.Mesh(
-    new THREE.BoxGeometry(0.06, 0.3, 2.6),
-    new THREE.MeshStandardMaterial({ color: 0xffd700 }),
-  );
-  mcbLbl.position.set(-6.88, 5.4, -3.6);
-  const cols = [0x22c55e, 0x22c55e, 0xf59e0b, 0xf59e0b, 0x3b82f6, 0x3b82f6];
-  for (let i = 0; i < 6; i++) {
-    const br = new THREE.Mesh(
-      new THREE.BoxGeometry(0.3, 0.9, 0.35),
-      new THREE.MeshStandardMaterial({ color: cols[i] }),
-    );
-    br.position.set(-6.88, 3.6, -4.1 + i * 0.45);
-    mcbGroup.add(br);
-  }
-  mcbGroup.add(mcbEnc, mcbFace, mcbLbl);
-  mcbGroup.visible = false;
-  scene.add(mcbGroup);
-  refs['mcb3d'] = mcbGroup;
-
-  // ── Interior Bulb (inside house, hanging from ceiling) ──
-  const bulb = new THREE.Mesh(
-    new THREE.SphereGeometry(0.35, 14, 14),
-    new THREE.MeshStandardMaterial({ color: 0xddddaa, roughness: 0.3 }),
-  );
-  bulb.position.set(0, 7.5, 0);
-  scene.add(bulb);
-  refs['bulb'] = bulb;
-
-  // Bulb socket/cord
-  const cord = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.04, 0.04, 0.6, 8),
-    new THREE.MeshStandardMaterial({ color: 0x333333 }),
-  );
-  cord.position.set(0, 8.0, 0);
-  scene.add(cord);
-
-  // Point light for the bulb (off by default)
-  const bulbLight = new THREE.PointLight(0xfff5cc, 0, 18);
-  bulbLight.position.set(0, 7.5, 0);
-  scene.add(bulbLight);
-  refs['bulbLight'] = bulbLight;
-
-  // Second bulb in left room
-  const bulb2 = new THREE.Mesh(
-    new THREE.SphereGeometry(0.3, 12, 12),
-    new THREE.MeshStandardMaterial({ color: 0xddddaa, roughness: 0.3 }),
-  );
-  bulb2.position.set(-5, 7.5, 0);
-  scene.add(bulb2);
-  refs['bulb2'] = bulb2;
-  const bulbLight2 = new THREE.PointLight(0xfff5cc, 0, 14);
-  bulbLight2.position.set(-5, 7.5, 0);
-  scene.add(bulbLight2);
-  refs['bulbLight2'] = bulbLight2;
-
-  // Third bulb in right room
-  const bulb3 = new THREE.Mesh(
-    new THREE.SphereGeometry(0.3, 12, 12),
-    new THREE.MeshStandardMaterial({ color: 0xddddaa, roughness: 0.3 }),
-  );
-  bulb3.position.set(5, 7.5, 0);
-  scene.add(bulb3);
-  refs['bulb3'] = bulb3;
-  const bulbLight3 = new THREE.PointLight(0xfff5cc, 0, 14);
-  bulbLight3.position.set(5, 7.5, 0);
-  scene.add(bulbLight3);
-  refs['bulbLight3'] = bulbLight3;
-
-  // Floating label sprites (simple colored planes as label anchors)
-  const makeLabel = (x: number, y: number, z: number, color: number) => {
-    const m = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.5, 0.18),
-      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6, side: THREE.DoubleSide }),
-    );
-    m.position.set(x, y, z);
-    scene.add(m);
-    return m;
-  };
-  refs['labelMeter']  = makeLabel(-7.5, 5.2, -1,   0x8b5cf6);
-  refs['labelSwitch'] = makeLabel(-7.0, 5.2, -2.5, 0xef4444);
-  refs['labelMcb']    = makeLabel(-6.5, 5.8, -3.6, 0x059669);
-}
-
-// ─────────────────────────────────────────────────────────────
-// Spark effect
-// ─────────────────────────────────────────────────────────────
-
-function createSpark(scene: THREE.Scene, pos: THREE.Vector3): () => void {
-  const sparks: THREE.Mesh[] = [];
-  for (let i = 0; i < 14; i++) {
-    const m = new THREE.Mesh(
-      new THREE.SphereGeometry(0.07, 6, 6),
-      new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0xff6600, emissiveIntensity: 2.5 }),
-    );
-    m.position.copy(pos);
-    scene.add(m);
-    sparks.push(m);
-  }
-  const velocities = sparks.map(() => new THREE.Vector3(
-    (Math.random() - 0.5) * 3.5,
-    Math.random() * 3.5 + 1,
-    (Math.random() - 0.5) * 3.5,
-  ));
-  let t = 0;
-  const interval = setInterval(() => {
-    t += 0.05;
-    sparks.forEach((s, i) => {
-      s.position.addScaledVector(velocities[i], 0.05);
-      velocities[i].y -= 0.12;
-      s.scale.setScalar(Math.max(0, 1 - t * 1.6));
-    });
-    if (t > 0.8) {
-      clearInterval(interval);
-      sparks.forEach(s => scene.remove(s));
+/** Flowing electricity particles along a wire segment */
+const ElectricParticles = ({
+  fromId, toId, active,
+}: {
+  fromId: string; toId: string; active: boolean;
+}) => {
+  const ref = useRef<THREE.Points>(null!);
+  const COUNT = 28;
+  const posRef = useRef(new Float32Array(COUNT * 3));
+  const tRef = useRef<number[]>([]);
+  const s = NODE_ATTACH[fromId];
+  const e = NODE_ATTACH[toId];
+  const mid: [number,number,number] = [
+    (s[0]+e[0])/2, Math.max(s[1],e[1])+0.4, (s[2]+e[2])/2,
+  ];
+  useEffect(() => { tRef.current = Array.from({ length: COUNT }, () => Math.random()); }, []);
+  useFrame((_, dt) => {
+    if (!active || !ref.current) return;
+    const arr = posRef.current; const ts = tRef.current;
+    for (let i = 0; i < COUNT; i++) {
+      ts[i] = (ts[i] + dt * 0.55) % 1; const t = ts[i];
+      arr[i*3]   = (1-t)*(1-t)*s[0] + 2*(1-t)*t*mid[0] + t*t*e[0];
+      arr[i*3+1] = (1-t)*(1-t)*s[1] + 2*(1-t)*t*mid[1] + t*t*e[1];
+      arr[i*3+2] = (1-t)*(1-t)*s[2] + 2*(1-t)*t*mid[2] + t*t*e[2];
     }
-  }, 30);
-  return () => { clearInterval(interval); sparks.forEach(s => scene.remove(s)); };
-}
-
-// ─────────────────────────────────────────────────────────────
-// Electricity flow particle
-// ─────────────────────────────────────────────────────────────
-
-function createFlowParticles(
-  scene: THREE.Scene,
-  wireMeshes: THREE.Mesh[],
-): () => void {
-  const particles: THREE.Mesh[] = [];
-  wireMeshes.forEach(wire => {
-    const mat = wire.material as THREE.MeshStandardMaterial;
-    let t = 0;
-    const interval = setInterval(() => {
-      t += 0.018;
-      mat.emissiveIntensity = 0.5 + Math.sin(t * 6) * 0.45;
-    }, 30);
-    (wire as any).__flowInterval = interval;
+    ref.current.geometry.attributes.position.needsUpdate = true;
   });
-  return () => {
-    wireMeshes.forEach(wire => clearInterval((wire as any).__flowInterval));
-    particles.forEach(p => scene.remove(p));
-  };
+  return (
+    <points ref={ref}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[posRef.current, 3]} />
+      </bufferGeometry>
+      <pointsMaterial color="#fbbf24" size={0.28} transparent opacity={active ? 1 : 0} depthWrite={false} />
+    </points>
+  );
+};
+
+/** Floating HTML label in 3D space */
+const Label3D = ({ position, text, active, yOffset = 0 }: {
+  position: [number,number,number]; text: string; active: boolean; yOffset?: number;
+}) => {
+  const groupRef = useRef<THREE.Group>(null!);
+  useFrame(({ clock }) => {
+    if (!groupRef.current) return;
+    groupRef.current.position.y = position[1] + yOffset + Math.sin(clock.getElapsedTime() * 1.4) * 0.2;
+  });
+  return (
+    <group ref={groupRef} position={[position[0], position[1] + yOffset, position[2]]}>
+      <Html center distanceFactor={26} zIndexRange={[10,0]}>
+        <div style={{
+          pointerEvents:'none', whiteSpace:'nowrap', padding:'3px 10px', borderRadius:'16px',
+          fontSize:'10px', fontWeight:700, fontFamily:'system-ui,sans-serif',
+          background: active
+            ? 'linear-gradient(135deg,rgba(251,191,36,0.95),rgba(245,158,11,0.95))'
+            : 'rgba(15,23,42,0.82)',
+          color: active ? '#1c1917' : '#cbd5e1',
+          border: active ? '1.5px solid #fbbf24' : '1.5px solid rgba(100,116,139,0.4)',
+          boxShadow: active ? '0 0 10px rgba(251,191,36,0.55)' : '0 1px 6px rgba(0,0,0,0.3)',
+        }}>
+          {text}
+        </div>
+      </Html>
+    </group>
+  );
+};
+
+/** Pulsing ground ring at a node — cyan for source, green for target */
+const PulsingRing = ({ position, color = '#22d3ee' }: {
+  position: [number,number,number]; color?: string;
+}) => {
+  const ref = useRef<THREE.Mesh>(null!);
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    const s = 1 + Math.sin(clock.getElapsedTime() * 3) * 0.28;
+    ref.current.scale.set(s, 1, s);
+    (ref.current.material as THREE.MeshStandardMaterial).opacity =
+      0.55 - Math.sin(clock.getElapsedTime() * 3) * 0.22;
+  });
+  return (
+    <mesh ref={ref} position={[position[0], position[1]+0.05, position[2]]} rotation={[-Math.PI/2,0,0]}>
+      <ringGeometry args={[1.4, 2.0, 32]} />
+      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1.2}
+        transparent opacity={0.5} depthWrite={false} />
+    </mesh>
+  );
+};
+
+/** Glowing cyan halo sphere on the valid wire source */
+const SourceHalo = ({ position }: { position: [number,number,number] }) => {
+  const ref = useRef<THREE.Mesh>(null!);
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    const s = 1 + Math.sin(clock.getElapsedTime() * 4) * 0.22;
+    ref.current.scale.setScalar(s);
+    (ref.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
+      1.2 + Math.sin(clock.getElapsedTime() * 4) * 0.5;
+  });
+  return (
+    <mesh ref={ref} position={position}>
+      <sphereGeometry args={[0.5, 16, 16]} />
+      <meshStandardMaterial color="#22d3ee" emissive="#22d3ee" emissiveIntensity={1.5}
+        transparent opacity={0.8} depthWrite={false} />
+    </mesh>
+  );
+};
+
+/** Spark burst on success */
+const SparkBurst = ({ position }: { position: [number,number,number] }) => {
+  const ref = useRef<THREE.Points>(null!);
+  const COUNT = 24;
+  const posArr = useMemo(() => new Float32Array(COUNT * 3), []);
+  const velRef = useRef<[number,number,number][]>([]);
+  const lifeRef = useRef(0);
+  useEffect(() => {
+    velRef.current = Array.from({length: COUNT}, () => [
+      (Math.random()-0.5)*7, Math.random()*5+1, (Math.random()-0.5)*7,
+    ] as [number,number,number]);
+    lifeRef.current = 0;
+    for (let i = 0; i < COUNT; i++) {
+      posArr[i*3]=position[0]; posArr[i*3+1]=position[1]; posArr[i*3+2]=position[2];
+    }
+  }, [position, posArr]);
+  useFrame((_, dt) => {
+    if (!ref.current || lifeRef.current > 1.2) return;
+    lifeRef.current += dt;
+    velRef.current.forEach(([vx,vy,vz], i) => {
+      posArr[i*3] += vx*dt; posArr[i*3+1] += (vy - lifeRef.current*5)*dt; posArr[i*3+2] += vz*dt;
+    });
+    ref.current.geometry.attributes.position.needsUpdate = true;
+    (ref.current.material as THREE.PointsMaterial).opacity = Math.max(0, 1 - lifeRef.current/0.9);
+  });
+  return (
+    <points ref={ref}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[posArr, 3]} />
+      </bufferGeometry>
+      <pointsMaterial color="#ffd700" size={0.42} transparent opacity={1} depthWrite={false} />
+    </points>
+  );
+};
+
+/** Ground ripple on success */
+const GroundRipple = ({ position }: { position: [number,number,number] }) => {
+  const ref = useRef<THREE.Mesh>(null!);
+  const life = useRef(0);
+  useFrame((_, dt) => {
+    if (!ref.current) return;
+    life.current += dt;
+    ref.current.scale.set(1+life.current*4, 1, 1+life.current*4);
+    (ref.current.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.55 - life.current*0.75);
+  });
+  return (
+    <mesh ref={ref} position={[position[0], 0.06, position[2]]} rotation={[-Math.PI/2,0,0]}>
+      <ringGeometry args={[0.4, 1.1, 32]} />
+      <meshBasicMaterial color="#60a5fa" transparent opacity={0.55} depthWrite={false} />
+    </mesh>
+  );
+};
+
+/** Red error ring on failed connection */
+const ErrorRing = ({ position }: { position: [number,number,number] }) => {
+  const ref = useRef<THREE.Mesh>(null!);
+  const life = useRef(0);
+  useFrame((_, dt) => {
+    if (!ref.current) return;
+    life.current += dt;
+    const s = 1 + Math.sin(life.current * 22) * 0.18;
+    ref.current.scale.set(s, 1, s);
+    (ref.current.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.9 - life.current*1.6);
+  });
+  return (
+    <mesh ref={ref} position={[position[0], 0.1, position[2]]} rotation={[-Math.PI/2,0,0]}>
+      <ringGeometry args={[1.8, 3.0, 32]} />
+      <meshBasicMaterial color="#ef4444" transparent opacity={0.9} depthWrite={false} />
+    </mesh>
+  );
+};
+
+/** Animated wire preview while dragging */
+const DraggableWire = ({ start, end }: {
+  start: [number,number,number]; end: [number,number,number];
+}) => {
+  const matRef = useRef<THREE.MeshStandardMaterial>(null!);
+  const curve = useMemo(() => new THREE.CatmullRomCurve3([
+    new THREE.Vector3(...start),
+    new THREE.Vector3((start[0]+end[0])/2, Math.max(start[1],end[1])+0.3, (start[2]+end[2])/2),
+    new THREE.Vector3(...end),
+  ]), [start, end]);
+  useFrame(({ clock }) => {
+    if (!matRef.current) return;
+    matRef.current.emissiveIntensity = 0.4 + Math.sin(clock.getElapsedTime()*10)*0.35;
+  });
+  return (
+    <mesh>
+      <tubeGeometry args={[curve, 20, 0.08, 8, false]} />
+      <meshStandardMaterial ref={matRef} color="#22d3ee" emissive="#22d3ee"
+        emissiveIntensity={0.5} transparent opacity={0.88} metalness={0.2} roughness={0.4} />
+    </mesh>
+  );
+};
+
+/** Invisible horizontal plane that captures pointer movement during wire drag */
+const DragPlane = ({ active, onMove, onRelease }: {
+  active: boolean; onMove: (pt: THREE.Vector3) => void; onRelease: () => void;
+}) => {
+  if (!active) return null;
+  return (
+    <mesh position={[0, 5.5, 0]} rotation={[-Math.PI/2, 0, 0]}
+      onPointerMove={(e) => { e.stopPropagation(); onMove(e.point); }}
+      onPointerUp={(e) => { e.stopPropagation(); onRelease(); }}>
+      <planeGeometry args={[120, 120]} />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+    </mesh>
+  );
+};
+
+/** Drop zone ring + label shown before component is placed */
+const DropZone = ({ position, label, isHighlighted, placed }: {
+  position: [number,number,number]; label: string; isHighlighted: boolean; placed: boolean;
+}) => {
+  const ref = useRef<THREE.Mesh>(null!);
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    (ref.current.material as THREE.MeshBasicMaterial).opacity = placed ? 0
+      : isHighlighted ? 0.55 + Math.sin(clock.getElapsedTime()*4)*0.3
+      : 0.2 + Math.sin(clock.getElapsedTime()*2)*0.1;
+  });
+  if (placed) return null;
+  return (
+    <group position={position}>
+      <mesh ref={ref} rotation={[-Math.PI/2, 0, 0]}>
+        <ringGeometry args={[1.2, 2.4, 32]} />
+        <meshBasicMaterial color={isHighlighted ? '#60a5fa' : '#94a3b8'}
+          transparent opacity={0.2} depthWrite={false} />
+      </mesh>
+      <Html center distanceFactor={22} zIndexRange={[5, 0]}>
+        <div style={{
+          pointerEvents:'none', whiteSpace:'nowrap', fontSize:'9px', fontWeight:700,
+          color: isHighlighted ? '#93c5fd' : '#94a3b8', fontFamily:'system-ui,sans-serif',
+          background:'rgba(15,23,42,0.78)', padding:'3px 8px', borderRadius:'10px',
+          border:`1px dashed ${isHighlighted ? '#60a5fa' : '#475569'}`,
+          boxShadow: isHighlighted ? '0 0 8px rgba(96,165,250,0.4)' : 'none',
+        }}>
+          Drop {label} here
+        </div>
+      </Html>
+    </group>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HOUSE GEOMETRY (exact match to original — converted to R3F JSX)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HouseMeshes = () => (
+  <group>
+    {/* Grass */}
+    <mesh rotation-x={-Math.PI / 2} position={[0, -0.15, 0]} receiveShadow>
+      <planeGeometry args={[60, 40]} />
+      <meshStandardMaterial color="#7cc05a" roughness={0.9} />
+    </mesh>
+    {/* Concrete slab */}
+    <mesh position={[0, 0, 0]} castShadow receiveShadow>
+      <boxGeometry args={[16, 0.4, 9]} />
+      <meshStandardMaterial color="#d8cfc0" roughness={0.7} />
+    </mesh>
+    {/* Back wall */}
+    <mesh position={[0, 4.05, -4.2]} castShadow receiveShadow>
+      <boxGeometry args={[16, 7.5, 0.4]} />
+      <meshStandardMaterial color="#f7f3ee" roughness={0.55} metalness={0.02} />
+    </mesh>
+    {/* Left wall */}
+    <mesh position={[-8, 4.05, 0]} castShadow receiveShadow>
+      <boxGeometry args={[0.4, 7.5, 9]} />
+      <meshStandardMaterial color="#f7f3ee" roughness={0.55} metalness={0.02} />
+    </mesh>
+    {/* Right wall */}
+    <mesh position={[8, 4.05, 0]} castShadow receiveShadow>
+      <boxGeometry args={[0.4, 7.5, 9]} />
+      <meshStandardMaterial color="#f7f3ee" roughness={0.55} metalness={0.02} />
+    </mesh>
+    {/* Interior dividers */}
+    <mesh position={[-2.5, 4.05, -0.5]} castShadow receiveShadow>
+      <boxGeometry args={[3, 7.5, 0.35]} />
+      <meshStandardMaterial color="#d5c8ba" roughness={0.7} />
+    </mesh>
+    <mesh position={[3.5, 4.05, -0.5]} castShadow receiveShadow>
+      <boxGeometry args={[3, 7.5, 0.35]} />
+      <meshStandardMaterial color="#d5c8ba" roughness={0.7} />
+    </mesh>
+    {/* Flat roof */}
+    <mesh position={[0, 8.05, 0]} castShadow receiveShadow>
+      <boxGeometry args={[17.5, 0.5, 10.5]} />
+      <meshStandardMaterial color="#607080" roughness={0.5} metalness={0.1} />
+    </mesh>
+    {/* Parapet walls */}
+    <mesh position={[0, 8.7, -5.1]} castShadow>
+      <boxGeometry args={[17.6, 0.8, 0.25]} />
+      <meshStandardMaterial color="#777060" roughness={0.6} />
+    </mesh>
+    <mesh position={[0, 8.7, 5.1]} castShadow>
+      <boxGeometry args={[17.6, 0.8, 0.25]} />
+      <meshStandardMaterial color="#777060" roughness={0.6} />
+    </mesh>
+    {/* Window glass L */}
+    <mesh position={[-5, 4.2, 4.4]}>
+      <boxGeometry args={[3.5, 2.8, 0.25]} />
+      <meshStandardMaterial color="#8ec8e8" transparent opacity={0.35} metalness={0.2} />
+    </mesh>
+    {/* Window glass R */}
+    <mesh position={[3, 4.2, 4.4]}>
+      <boxGeometry args={[3.5, 2.8, 0.25]} />
+      <meshStandardMaterial color="#8ec8e8" transparent opacity={0.35} metalness={0.2} />
+    </mesh>
+    {/* Window frames */}
+    <mesh position={[-5, 4.2, 4.3]}>
+      <boxGeometry args={[3.7, 3.0, 0.15]} />
+      <meshStandardMaterial color="#888888" metalness={0.8} roughness={0.2} />
+    </mesh>
+    <mesh position={[3, 4.2, 4.3]}>
+      <boxGeometry args={[3.7, 3.0, 0.15]} />
+      <meshStandardMaterial color="#888888" metalness={0.8} roughness={0.2} />
+    </mesh>
+    {/* Extra inner glass */}
+    <mesh position={[-5, 4.2, 4.45]}>
+      <boxGeometry args={[3.4, 2.7, 0.25]} />
+      <meshStandardMaterial color="#8ec8e8" transparent opacity={0.35} metalness={0.2} />
+    </mesh>
+    <mesh position={[3, 4.2, 4.45]}>
+      <boxGeometry args={[3.4, 2.7, 0.25]} />
+      <meshStandardMaterial color="#8ec8e8" transparent opacity={0.35} metalness={0.2} />
+    </mesh>
+    {/* Front door */}
+    <mesh position={[0, 2.05, 4.4]} castShadow>
+      <boxGeometry args={[1.8, 3.5, 0.2]} />
+      <meshStandardMaterial color="#3b5278" roughness={0.3} metalness={0.3} />
+    </mesh>
+    {/* Door handle */}
+    <mesh position={[0.7, 2.0, 4.55]}>
+      <boxGeometry args={[0.08, 0.08, 0.2]} />
+      <meshStandardMaterial color="#ddbb44" metalness={0.9} roughness={0.1} />
+    </mesh>
+    {/* Pathway */}
+    <mesh rotation-x={-Math.PI / 2} position={[0, -0.12, 7.5]}>
+      <planeGeometry args={[2.5, 6]} />
+      <meshStandardMaterial color="#c0b8a0" roughness={0.9} />
+    </mesh>
+  </group>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UTILITY POLE + SERVICE CABLE
+// ─────────────────────────────────────────────────────────────────────────────
+
+const UtilityPole = ({ serviceActive }: { serviceActive: boolean }) => {
+  const cableMatRef = useRef<THREE.MeshStandardMaterial>(null!);
+  useFrame(({ clock }) => {
+    if (!cableMatRef.current) return;
+    if (serviceActive) {
+      cableMatRef.current.color.set('#ffcc00');
+      cableMatRef.current.emissive.set('#ffcc00');
+      cableMatRef.current.emissiveIntensity = 0.4 + Math.sin(clock.getElapsedTime() * 3) * 0.2;
+    } else {
+      cableMatRef.current.color.set('#555555');
+      cableMatRef.current.emissive.set('#000000');
+      cableMatRef.current.emissiveIntensity = 0;
+    }
+  });
+  const cableCurve = useMemo(() => new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-10, 11.5, 0),
+    new THREE.Vector3(-8.8, 9.5, -0.5),
+    new THREE.Vector3(-8.4, 7.0, -1.0),
+    new THREE.Vector3(-8.2, 5.2, -1.0),
+  ]), []);
+  return (
+    <group>
+      {/* Pole shaft */}
+      <mesh position={[-10, 6.5, 0]} castShadow>
+        <cylinderGeometry args={[0.22, 0.28, 13, 12]} />
+        <meshStandardMaterial color="#5a3a20" roughness={0.9} />
+      </mesh>
+      {/* Cross arm */}
+      <mesh position={[-10, 11.5, 0]}>
+        <boxGeometry args={[3.0, 0.2, 0.2]} />
+        <meshStandardMaterial color="#6a4a30" />
+      </mesh>
+      {/* Insulators */}
+      {([-0.8, 0.8] as number[]).map((dx, i) => (
+        <mesh key={i} position={[-10 + dx, 11.3, 0]}>
+          <cylinderGeometry args={[0.12, 0.12, 0.4, 8]} />
+          <meshStandardMaterial color="#9090bb" />
+        </mesh>
+      ))}
+      {/* Service cable (pole → meter) */}
+      <mesh>
+        <tubeGeometry args={[cableCurve, 24, 0.06, 7, false]} />
+        <meshStandardMaterial ref={cableMatRef} color="#555555" emissive="#000" emissiveIntensity={0} />
+      </mesh>
+      <Label3D position={[-10, 14, 0]} text="Utility Pole (240 V)" active={serviceActive} yOffset={0} />
+    </group>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ELECTRICAL COMPONENTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ElectricMeter3D = ({ placed, isWireSource, isWireTarget, onWireDragStart }: {
+  placed: boolean; isWireSource: boolean; isWireTarget: boolean; onWireDragStart: () => void;
+}) => {
+  const groupRef = useRef<THREE.Group>(null!);
+  const scaleRef = useRef(0);
+  const [hovered, setHovered] = useState(false);
+  useFrame((_, dt) => {
+    if (!groupRef.current) return;
+    if (placed && scaleRef.current < 1) {
+      scaleRef.current = Math.min(1, scaleRef.current + dt * 4);
+      groupRef.current.scale.setScalar(scaleRef.current);
+    }
+  });
+  if (!placed) return null;
+  return (
+    <group ref={groupRef} position={[-8.1, 3.5, -1]}
+      onPointerDown={(e) => { if (isWireSource) { e.stopPropagation(); onWireDragStart(); } }}
+      onPointerOver={() => { setHovered(true); if (isWireSource) document.body.style.cursor = 'crosshair'; }}
+      onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
+    >
+      {isWireSource && <PulsingRing position={[0, -3.4, 0]} color="#22d3ee" />}
+      {isWireTarget && <PulsingRing position={[0, -3.4, 0]} color="#4ade80" />}
+      {/* Mounting plate */}
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[0.15, 3.4, 2.4]} />
+        <meshStandardMaterial color="#2c3e50" metalness={0.4}
+          emissive={isWireSource && hovered ? '#22d3ee' : '#000'}
+          emissiveIntensity={isWireSource && hovered ? 0.35 : 0} />
+      </mesh>
+      {/* White casing */}
+      <mesh position={[0.32, 0, 0]}>
+        <boxGeometry args={[0.5, 3.0, 2.0]} />
+        <meshStandardMaterial color="#f2f2f2" roughness={0.3} />
+      </mesh>
+      {/* LCD display */}
+      <mesh position={[0.6, 0.3, 0]}>
+        <boxGeometry args={[0.12, 0.6, 1.3]} />
+        <meshStandardMaterial color="#c8f0d0" roughness={0.2} />
+      </mesh>
+      {/* Rotating dial */}
+      <mesh position={[0.6, -0.55, 0]} rotation-z={Math.PI / 2}>
+        <cylinderGeometry args={[0.5, 0.5, 0.1, 20]} />
+        <meshStandardMaterial color="#fafafa" />
+      </mesh>
+      {/* kWh strip */}
+      <mesh position={[0.6, -1.1, 0]}>
+        <boxGeometry args={[0.1, 0.3, 1.8]} />
+        <meshStandardMaterial color="#ffd700" />
+      </mesh>
+      {isWireSource && <SourceHalo position={NODE_ATTACH['meter']} />}
+      <Label3D position={[0, 2.5, 0]} text="📊 Electric Meter" active yOffset={0.5} />
+    </group>
+  );
+};
+
+const MainSwitch3D = ({ placed, isWireSource, isWireTarget, onWireDragStart }: {
+  placed: boolean; isWireSource: boolean; isWireTarget: boolean; onWireDragStart: () => void;
+}) => {
+  const groupRef = useRef<THREE.Group>(null!);
+  const scaleRef = useRef(0);
+  const [hovered, setHovered] = useState(false);
+  useFrame((_, dt) => {
+    if (!groupRef.current) return;
+    if (placed && scaleRef.current < 1) {
+      scaleRef.current = Math.min(1, scaleRef.current + dt * 4);
+      groupRef.current.scale.setScalar(scaleRef.current);
+    }
+  });
+  if (!placed) return null;
+  return (
+    <group ref={groupRef} position={[-7.6, 3.5, -2.5]}
+      onPointerDown={(e) => { if (isWireSource) { e.stopPropagation(); onWireDragStart(); } }}
+      onPointerOver={() => { setHovered(true); if (isWireSource) document.body.style.cursor = 'crosshair'; }}
+      onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
+    >
+      {isWireSource && <PulsingRing position={[0, -3.4, 0]} color="#22d3ee" />}
+      {isWireTarget && <PulsingRing position={[0, -3.4, 0]} color="#4ade80" />}
+      {/* Red body */}
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[0.5, 2.0, 1.1]} />
+        <meshStandardMaterial color="#bb2020" roughness={0.5}
+          emissive={isWireSource && hovered ? '#22d3ee' : isWireTarget ? '#4ade80' : '#000'}
+          emissiveIntensity={hovered || isWireTarget ? 0.3 : 0} />
+      </mesh>
+      {/* Yellow lever */}
+      <mesh position={[0.22, 0.38, 0]}>
+        <boxGeometry args={[0.15, 1.0, 0.25]} />
+        <meshStandardMaterial color="#ffd700" />
+      </mesh>
+      {/* Green LED */}
+      <mesh position={[0.22, -0.45, 0]}>
+        <sphereGeometry args={[0.1, 8, 8]} />
+        <meshStandardMaterial color="#22dd44" emissive="#22dd44" emissiveIntensity={0.9} />
+      </mesh>
+      {isWireSource && <SourceHalo position={NODE_ATTACH['switch']} />}
+      {isWireTarget && (
+        <mesh position={[0, 1.8, 0]}>
+          <sphereGeometry args={[0.55, 16, 16]} />
+          <meshStandardMaterial color="#4ade80" emissive="#4ade80" emissiveIntensity={2.5} transparent opacity={0.7} />
+        </mesh>
+      )}
+      <Label3D position={[0, 2.2, 0]} text="🔴 Main Switch" active yOffset={0.5} />
+    </group>
+  );
+};
+
+const MCBPanel3D = ({ placed, isWireSource, isWireTarget, active, onWireDragStart }: {
+  placed: boolean; isWireSource: boolean; isWireTarget: boolean; active: boolean; onWireDragStart: () => void;
+}) => {
+  const groupRef = useRef<THREE.Group>(null!);
+  const scaleRef = useRef(0);
+  const [hovered, setHovered] = useState(false);
+  const cols = [0x22c55e, 0x22c55e, 0xf59e0b, 0xf59e0b, 0x3b82f6, 0x3b82f6];
+  useFrame((_, dt) => {
+    if (!groupRef.current) return;
+    if (placed && scaleRef.current < 1) {
+      scaleRef.current = Math.min(1, scaleRef.current + dt * 4);
+      groupRef.current.scale.setScalar(scaleRef.current);
+    }
+  });
+  if (!placed) return null;
+  return (
+    <group ref={groupRef} position={[-7.2, 3.8, -3.6]}
+      onPointerDown={(e) => { if (isWireSource) { e.stopPropagation(); onWireDragStart(); } }}
+      onPointerOver={() => { setHovered(true); if (isWireSource) document.body.style.cursor = 'crosshair'; }}
+      onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
+    >
+      {isWireSource && <PulsingRing position={[0, -3.7, 0]} color="#22d3ee" />}
+      {isWireTarget && <PulsingRing position={[0, -3.7, 0]} color="#4ade80" />}
+      {/* Enclosure */}
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[0.6, 4.0, 3.2]} />
+        <meshStandardMaterial color="#1e293b" metalness={0.2}
+          emissive={isWireSource && hovered ? '#22d3ee' : isWireTarget ? '#4ade80' : '#000'}
+          emissiveIntensity={hovered || isWireTarget ? 0.25 : 0} />
+      </mesh>
+      {/* Face plate */}
+      <mesh position={[0.25, 0, 0]}>
+        <boxGeometry args={[0.12, 3.5, 2.8]} />
+        <meshStandardMaterial color="#334155" />
+      </mesh>
+      {/* Label strip */}
+      <mesh position={[0.3, 1.65, 0]}>
+        <boxGeometry args={[0.06, 0.3, 2.6]} />
+        <meshStandardMaterial color="#ffd700" />
+      </mesh>
+      {/* Breakers */}
+      {cols.map((c, i) => (
+        <mesh key={i} position={[0.3, 0.6 - i * 0.45, 0]}>
+          <boxGeometry args={[0.3, 0.9, 0.35]} />
+          <meshStandardMaterial color={`#${c.toString(16).padStart(6,'0')}`}
+            emissive={`#${c.toString(16).padStart(6,'0')}`}
+            emissiveIntensity={active ? 0.6 : 0.1} />
+        </mesh>
+      ))}
+      {isWireSource && <SourceHalo position={NODE_ATTACH['mcb']} />}
+      {isWireTarget && (
+        <mesh position={[0, 2.6, 0]}>
+          <sphereGeometry args={[0.55, 16, 16]} />
+          <meshStandardMaterial color="#4ade80" emissive="#4ade80" emissiveIntensity={2.5} transparent opacity={0.7} />
+        </mesh>
+      )}
+      <Label3D position={[0, 2.8, 0]} text="🛡️ MCB Panel" active yOffset={0.5} />
+    </group>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HOUSE ENDPOINT NODE + BULBS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HouseEndpoint = ({ active, isWireTarget }: { active: boolean; isWireTarget: boolean }) => {
+  const ref = useRef<THREE.Mesh>(null!);
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    (ref.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
+      active ? 0.8 + Math.sin(clock.getElapsedTime() * 3) * 0.4 : isWireTarget ? 1.2 : 0.15;
+  });
+  return (
+    <group position={[0, 5.5, 0]}>
+      {isWireTarget && <PulsingRing position={[0, -5.4, 0]} color="#4ade80" />}
+      <mesh ref={ref} castShadow>
+        <boxGeometry args={[1.0, 0.8, 0.6]} />
+        <meshStandardMaterial color={active ? '#ffd700' : '#1e293b'}
+          emissive={active ? '#ffd700' : isWireTarget ? '#4ade80' : '#334155'}
+          emissiveIntensity={0.15} metalness={0.3} />
+      </mesh>
+      {isWireTarget && (
+        <mesh position={[0, 0.9, 0]}>
+          <sphereGeometry args={[0.55, 16, 16]} />
+          <meshStandardMaterial color="#4ade80" emissive="#4ade80" emissiveIntensity={2.5} transparent opacity={0.7} />
+        </mesh>
+      )}
+      <Label3D position={[0, 1.2, 0]} text="🏠 House Circuit" active={active} yOffset={0.5} />
+    </group>
+  );
+};
+
+const SingleBulb = ({ position, active, intensity }: {
+  position: [number,number,number]; active: boolean; intensity: number;
+}) => {
+  const ref = useRef<THREE.Mesh>(null!);
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    const mat = ref.current.material as THREE.MeshStandardMaterial;
+    mat.emissiveIntensity = active ? 1.5 + Math.sin(clock.getElapsedTime() * 2.2) * 0.3 : 0;
+  });
+  return (
+    <group>
+      <mesh position={[position[0], position[1] + 0.45, position[2]]}>
+        <cylinderGeometry args={[0.03, 0.03, 0.5, 6]} />
+        <meshStandardMaterial color="#333333" />
+      </mesh>
+      <mesh ref={ref} position={position}>
+        <sphereGeometry args={[0.32, 14, 14]} />
+        <meshStandardMaterial
+          color={active ? '#ffff88' : '#ddddaa'}
+          emissive="#ffee44" emissiveIntensity={0} roughness={0.3} />
+      </mesh>
+      <pointLight position={position} color="#fff5cc" intensity={active ? intensity : 0} distance={16} />
+    </group>
+  );
+};
+
+const CeilingBulbs = ({ active }: { active: boolean }) => (
+  <>
+    <SingleBulb position={[0,  7.6, 0]} active={active} intensity={5.0} />
+    <SingleBulb position={[-5, 7.6, 1]} active={active} intensity={3.5} />
+    <SingleBulb position={[5,  7.6, 1]} active={active} intensity={3.5} />
+  </>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCENE CONTENT (assembles all 3-D objects)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SceneProps {
+  connections: string[];
+  showExplanation: boolean;
+  orbitRef: React.MutableRefObject<any>;
+  placedItems: Set<string>;
+  buildComplete: boolean;
+  wireToolActive: boolean;
+  draggingToolId: string | null;
+  onSuccessfulConnection: (idx: number) => void;
+  onFailedConnection: () => void;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Main Component
-// ─────────────────────────────────────────────────────────────
+const SceneContent = ({
+  connections, showExplanation, orbitRef,
+  placedItems, buildComplete, wireToolActive, draggingToolId,
+  onSuccessfulConnection, onFailedConnection,
+}: SceneProps) => {
+  const step = connections.length;
+  const allDone = step >= 3;
+
+  // Wire drag state
+  const [wireDragging, setWireDragging] = useState(false);
+  const [wireStartNode, setWireStartNode] = useState<string | null>(null);
+  const [wireStartPos, setWireStartPos] = useState<[number,number,number]>([0, 5.5, 0]);
+  const [wireDragPos, setWireDragPos] = useState<[number,number,number]>([0, 5.5, 0]);
+  const [hoverTarget, setHoverTarget] = useState<string | null>(null);
+
+  // Effects
+  const [sparks, setSparks] = useState<{ id: number; pos: [number,number,number] }[]>([]);
+  const [ripples, setRipples] = useState<{ id: number; pos: [number,number,number] }[]>([]);
+  const [flashLines, setFlashLines] = useState<Set<number>>(new Set());
+  const [errorPos, setErrorPos] = useState<[number,number,number] | null>(null);
+
+  const validSource = step < 3 ? CONNECTION_FLOW[step].split('-')[0] : null;
+  const validTarget = step < 3 ? CONNECTION_FLOW[step].split('-')[1] : null;
+
+  const startWireDrag = useCallback((nodeId: string) => {
+    if (showExplanation || step >= 3 || !wireToolActive) return;
+    if (nodeId !== validSource) return;
+    const pos = NODE_ATTACH[nodeId];
+    setWireStartNode(nodeId);
+    setWireStartPos(pos);
+    setWireDragPos(pos);
+    setWireDragging(true);
+    if (orbitRef.current) orbitRef.current.enabled = false;
+    document.body.style.cursor = 'crosshair';
+  }, [showExplanation, step, wireToolActive, validSource, orbitRef]);
+
+  const handlePointerMove = useCallback((pt: THREE.Vector3) => {
+    setWireDragPos([pt.x, pt.y, pt.z]);
+    let closest: string | null = null;
+    let minDist = 4.0;
+    Object.entries(NODE_ATTACH).forEach(([nid, npos]) => {
+      if (nid === wireStartNode) return;
+      const d = Math.sqrt((pt.x - npos[0])**2 + (pt.z - npos[2])**2);
+      if (d < minDist) { minDist = d; closest = nid; }
+    });
+    setHoverTarget(closest);
+  }, [wireStartNode]);
+
+  const handleRelease = useCallback(() => {
+    if (!wireDragging) return;
+    setWireDragging(false);
+    if (orbitRef.current) orbitRef.current.enabled = true;
+    document.body.style.cursor = 'default';
+
+    if (hoverTarget) {
+      const key = `${wireStartNode}-${hoverTarget}`;
+      const expected = CONNECTION_FLOW[step];
+      if (key === expected) {
+        const targetPos = NODE_ATTACH[hoverTarget];
+        setSparks(prev => [...prev, { id: Date.now(), pos: targetPos }]);
+        setRipples(prev => [...prev, { id: Date.now(), pos: [targetPos[0], 0, targetPos[2]] }]);
+        setFlashLines(prev => new Set([...prev, step]));
+        setTimeout(() => setFlashLines(prev => { const s = new Set(prev); s.delete(step); return s; }), 900);
+        onSuccessfulConnection(step);
+      } else {
+        setErrorPos([wireDragPos[0], 0, wireDragPos[2]]);
+        setTimeout(() => setErrorPos(null), 700);
+        onFailedConnection();
+      }
+    } else {
+      setErrorPos([wireDragPos[0], 0, wireDragPos[2]]);
+      setTimeout(() => setErrorPos(null), 500);
+    }
+    setHoverTarget(null);
+    setWireStartNode(null);
+  }, [wireDragging, hoverTarget, wireStartNode, step, wireDragPos, orbitRef, onSuccessfulConnection, onFailedConnection]);
+
+  // Global pointer-up safety net
+  useEffect(() => {
+    if (!wireDragging) return;
+    const onUp = () => handleRelease();
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') handleRelease(); };
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('keydown', onEsc);
+    return () => { window.removeEventListener('pointerup', onUp); window.removeEventListener('keydown', onEsc); };
+  }, [wireDragging, handleRelease]);
+
+  // Cleanup effects
+  useEffect(() => {
+    if (!sparks.length) return;
+    const t = setTimeout(() => setSparks(prev => prev.filter(s => Date.now() - s.id < 1500)), 1600);
+    return () => clearTimeout(t);
+  }, [sparks]);
+  useEffect(() => {
+    if (!ripples.length) return;
+    const t = setTimeout(() => setRipples(prev => prev.filter(r => Date.now() - r.id < 1200)), 1300);
+    return () => clearTimeout(t);
+  }, [ripples]);
+
+  const dropZones = [
+    { id: 'meter',  pos: [-9.0, 0, -1.0] as [number,number,number], label: 'Meter'       },
+    { id: 'switch', pos: [-8.0, 0.3, -2.5] as [number,number,number], label: 'Main Switch' },
+    { id: 'mcb',    pos: [-7.5, 0.3, -3.6] as [number,number,number], label: 'MCB Panel'  },
+  ];
+
+  return (
+    <>
+      <DragPlane active={wireDragging} onMove={handlePointerMove} onRelease={handleRelease} />
+
+      {/* House geometry */}
+      <HouseMeshes />
+
+      {/* Utility pole + service cable */}
+      <UtilityPole serviceActive={step >= 1 || allDone} />
+
+      {/* Drop zones (build phase) */}
+      {!buildComplete && dropZones.map(z => (
+        <DropZone key={z.id} position={z.pos} label={z.label}
+          isHighlighted={draggingToolId === z.id} placed={placedItems.has(z.id)} />
+      ))}
+
+      {/* Electric Meter */}
+      <ElectricMeter3D
+        placed={placedItems.has('meter')}
+        isWireSource={wireToolActive && validSource === 'meter' && !wireDragging && !showExplanation}
+        isWireTarget={wireDragging && hoverTarget === 'meter'}
+        onWireDragStart={() => startWireDrag('meter')}
+      />
+
+      {/* Main Switch */}
+      <MainSwitch3D
+        placed={placedItems.has('switch')}
+        isWireSource={wireToolActive && validSource === 'switch' && !wireDragging && !showExplanation}
+        isWireTarget={wireDragging && hoverTarget === 'switch'}
+        onWireDragStart={() => startWireDrag('switch')}
+      />
+
+      {/* MCB Panel */}
+      <MCBPanel3D
+        placed={placedItems.has('mcb')}
+        isWireSource={wireToolActive && validSource === 'mcb' && !wireDragging && !showExplanation}
+        isWireTarget={wireDragging && hoverTarget === 'mcb'}
+        active={step >= 2}
+        onWireDragStart={() => startWireDrag('mcb')}
+      />
+
+      {/* House endpoint */}
+      <HouseEndpoint active={allDone} isWireTarget={wireDragging && hoverTarget === 'house'} />
+
+      {/* Active wire bundles */}
+      {step >= 1 && <WireBundle fromId="meter" toId="switch" active flash={flashLines.has(0)} />}
+      {step >= 2 && <WireBundle fromId="switch" toId="mcb" active flash={flashLines.has(1)} />}
+      {step >= 3 && <WireBundle fromId="mcb" toId="house" active flash={flashLines.has(2)} />}
+
+      {/* Flowing particles */}
+      {step >= 1 && <ElectricParticles fromId="meter" toId="switch" active />}
+      {step >= 2 && <ElectricParticles fromId="switch" toId="mcb" active />}
+      {step >= 3 && <ElectricParticles fromId="mcb" toId="house" active />}
+
+      {/* Ceiling bulbs */}
+      <CeilingBulbs active={allDone} />
+
+      {/* Wire drag preview */}
+      {wireDragging && <DraggableWire start={wireStartPos} end={wireDragPos} />}
+
+      {/* Release tooltip */}
+      {wireDragging && hoverTarget === validTarget && (
+        <Html position={[NODE_ATTACH[hoverTarget!][0], NODE_ATTACH[hoverTarget!][1]+1.6, NODE_ATTACH[hoverTarget!][2]]} center>
+          <div style={{
+            pointerEvents:'none', background:'rgba(15,23,42,0.92)', color:'#4ade80',
+            padding:'5px 14px', borderRadius:'14px', fontSize:'11px', fontWeight:700,
+            whiteSpace:'nowrap', border:'1.5px solid #4ade80', boxShadow:'0 0 12px rgba(74,222,128,0.5)',
+          }}>✓ Release to connect!</div>
+        </Html>
+      )}
+
+      {/* Drag hint tooltip */}
+      {wireDragging && hoverTarget !== validTarget && (
+        <Html position={[wireDragPos[0], wireDragPos[1]+1.5, wireDragPos[2]]} center>
+          <div style={{
+            pointerEvents:'none', background:'rgba(15,23,42,0.88)', color:'#93c5fd',
+            padding:'5px 14px', borderRadius:'14px', fontSize:'11px', fontWeight:700,
+            whiteSpace:'nowrap', border:'1.5px solid #60a5fa', boxShadow:'0 0 10px rgba(96,165,250,0.4)',
+          }}>
+            → Connect to: {validTarget === 'switch' ? 'Main Switch' : validTarget === 'mcb' ? 'MCB Panel' : 'House Circuit'}
+          </div>
+        </Html>
+      )}
+
+      {/* Effects */}
+      {sparks.map(s => <SparkBurst key={s.id} position={s.pos} />)}
+      {ripples.map(r => <GroundRipple key={r.id} position={r.pos} />)}
+      {errorPos && <ErrorRing position={errorPos} />}
+    </>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOOLKIT PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ToolkitItem = ({ item, placed, active, locked, onDragStart, onDragEnd, isDraggingThis }: {
+  item: typeof TOOLKIT_ITEMS[0]; placed: boolean; active: boolean; locked: boolean;
+  onDragStart: () => void; onDragEnd: () => void; isDraggingThis: boolean;
+}) => {
+  const isWire = item.id === 'wire';
+  const disabled = placed && !isWire;
+  return (
+    <motion.div
+      whileHover={!disabled && !locked ? { scale: 1.04, x: 4 } : {}}
+      whileTap={!disabled && !locked ? { scale: 0.96 } : {}}
+      onPointerDown={(e) => { if (disabled || locked) return; e.preventDefault(); onDragStart(); }}
+      onPointerUp={() => { if (!disabled && !locked) onDragEnd(); }}
+      style={{
+        display:'flex', alignItems:'center', gap:'10px', padding:'9px 12px', borderRadius:'12px',
+        cursor: disabled || locked ? 'not-allowed' : 'grab',
+        background: active
+          ? 'linear-gradient(135deg,rgba(34,211,238,0.25),rgba(96,165,250,0.2))'
+          : placed && !isWire ? 'rgba(30,41,59,0.3)' : item.bg,
+        border: active ? '1.5px solid #22d3ee'
+          : placed && !isWire ? '1.5px solid rgba(71,85,105,0.4)' : `1.5px solid ${item.color}55`,
+        opacity: disabled || locked ? 0.45 : 1,
+        transition:'all 0.2s ease', userSelect:'none',
+        boxShadow: active ? '0 0 12px rgba(34,211,238,0.35)' : isDraggingThis ? `0 0 16px ${item.color}88` : 'none',
+      }}
+    >
+      <span style={{ fontSize:'20px', lineHeight:1 }}>{item.icon}</span>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontSize:'11px', fontWeight:700, color: placed && !isWire ? '#64748b' : '#f1f5f9', lineHeight:1.2 }}>
+          {item.label}
+        </div>
+        <div style={{ fontSize:'10px', color: placed && !isWire ? '#475569' : '#94a3b8', marginTop:'1px' }}>
+          {item.sublabel}
+        </div>
+      </div>
+      {placed && !isWire && <span style={{ fontSize:'12px', color:'#22c55e' }}>✓</span>}
+      {active && <span style={{ fontSize:'11px', color:'#22d3ee', fontWeight:700 }}>ON</span>}
+      {locked && <span style={{ fontSize:'14px' }}>🔒</span>}
+    </motion.div>
+  );
+};
+
+const ToolkitPanel = ({ placedItems, buildComplete, wireToolActive, onToggleWireTool,
+  draggingToolId, onItemDragStart, onItemDragEnd, hint }: {
+  placedItems: Set<string>; buildComplete: boolean; wireToolActive: boolean;
+  onToggleWireTool: () => void; draggingToolId: string | null;
+  onItemDragStart: (id: string) => void; onItemDragEnd: (id: string) => void; hint: string;
+}) => (
+  <div style={{
+    position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)',
+    zIndex:20, width:'172px', display:'flex', flexDirection:'column', gap:'8px', pointerEvents:'auto',
+  }}>
+    <div style={{
+      background:'rgba(15,23,42,0.90)', backdropFilter:'blur(16px)', borderRadius:'16px', padding:'12px',
+      border:'1.5px solid rgba(99,102,241,0.4)',
+      boxShadow:'0 8px 32px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.06)',
+    }}>
+      <div style={{ fontSize:'10px', fontWeight:800, letterSpacing:'0.1em', color:'#818cf8', marginBottom:'10px', textAlign:'center' }}>
+        🔧 TOOLKIT
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>
+        {TOOLKIT_ITEMS.map(item => {
+          const isWire = item.id === 'wire';
+          const placed = placedItems.has(item.id);
+          const active = isWire && wireToolActive;
+          const locked = isWire && !buildComplete;
+          return (
+            <ToolkitItem key={item.id} item={item} placed={placed && !isWire} active={active} locked={locked}
+              isDraggingThis={draggingToolId === item.id}
+              onDragStart={() => {
+                if (isWire) { if (buildComplete) onToggleWireTool(); return; }
+                if (!placed) onItemDragStart(item.id);
+              }}
+              onDragEnd={() => { if (!isWire && !placed) onItemDragEnd(item.id); }}
+            />
+          );
+        })}
+      </div>
+    </div>
+
+    {/* Hint card */}
+    <motion.div key={hint} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} style={{
+      background:'rgba(15,23,42,0.90)', backdropFilter:'blur(12px)', borderRadius:'12px', padding:'10px 11px',
+      border:'1.5px solid rgba(99,102,241,0.3)', boxShadow:'0 4px 16px rgba(0,0,0,0.3)',
+    }}>
+      <div style={{ fontSize:'9px', fontWeight:700, color:'#818cf8', marginBottom:'5px', letterSpacing:'0.08em' }}>
+        💡 NEXT STEP
+      </div>
+      <div style={{ fontSize:'10.5px', color:'#cbd5e1', lineHeight:1.5, fontWeight:500 }}>{hint}</div>
+    </motion.div>
+
+    {/* Wire colour legend */}
+    <div style={{
+      background:'rgba(15,23,42,0.88)', backdropFilter:'blur(10px)', borderRadius:'12px', padding:'10px 11px',
+      border:'1.5px solid rgba(99,102,241,0.25)',
+    }}>
+      <div style={{ fontSize:'9px', fontWeight:700, color:'#818cf8', marginBottom:'6px', letterSpacing:'0.08em' }}>
+        🎨 WIRE COLOURS
+      </div>
+      {[
+        { color:'#ef4444', label:'Phase — 240V Live' },
+        { color:'#3b82f6', label:'Neutral — Return' },
+        { color:'#22c55e', label:'Earth — Safety' },
+      ].map(w => (
+        <div key={w.label} style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'4px' }}>
+          <div style={{ width:10, height:10, borderRadius:'50%', background:w.color, boxShadow:`0 0 5px ${w.color}`, flexShrink:0 }} />
+          <span style={{ fontSize:'9.5px', color:'#cbd5e1' }}>{w.label}</span>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAG GHOST
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DragGhost = ({ item, pos }: {
+  item: typeof TOOLKIT_ITEMS[0] | null; pos: { x:number; y:number };
+}) => {
+  if (!item) return null;
+  return (
+    <motion.div initial={{ scale:0.7, opacity:0 }} animate={{ scale:1, opacity:0.92 }} style={{
+      position:'fixed', left:pos.x+12, top:pos.y-24, zIndex:9999, pointerEvents:'none',
+      background:item.bg, border:`2px solid ${item.color}`, borderRadius:'10px', padding:'6px 12px',
+      boxShadow:`0 4px 20px ${item.color}55`, display:'flex', alignItems:'center', gap:'8px',
+      backdropFilter:'blur(8px)',
+    }}>
+      <span style={{ fontSize:'18px' }}>{item.icon}</span>
+      <span style={{ fontSize:'11px', fontWeight:700, color:'#f1f5f9', whiteSpace:'nowrap' }}>{item.label}</span>
+    </motion.div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const Level5House = () => {
-  const containerRef = useRef<HTMLDivElement>(null);
   const { setVoltMessage, setLevelComplete, addScore, addStar } = useGameStore();
-  const sceneRef   = useRef<THREE.Scene | null>(null);
-  const refs3d     = useRef<Record<string, THREE.Object3D | null>>({});
-  const wireMeshes = useRef<Record<string, THREE.Mesh>>({});
-  const completedRef = useRef(false);
 
-  const [placedComponents, setPlacedComponents] = useState<Set<ComponentId>>(new Set());
-  const [selectedWire, setSelectedWire]         = useState<WireType | null>(null);
-  const [connectingFrom, setConnectingFrom]     = useState<NodeId | null>(null);
-  const [connections, setConnections]           = useState<Set<string>>(new Set());
-  const [feedback, setFeedback]                 = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [circuitComplete, setCircuitComplete]   = useState(false);
-  const [phase, setPhase]                       = useState<'place' | 'wire' | 'done'>('place');
+  const [connections, setConnections] = useState<string[]>([]);
+  const [step, setStep] = useState(0);
+  const [showExplanation, setShowExplanation] = useState(false);
 
-  // Derived
-  const allComponentsPlaced = placedComponents.has('meter') && placedComponents.has('switch') && placedComponents.has('mcb');
-  const totalRequired = USER_SEGMENTS.length * 3;
-  const connectedCount = connections.size;
-  const progress = Math.round((connectedCount / totalRequired) * 100);
+  const [placedItems, setPlacedItems] = useState<Set<string>>(new Set());
+  const [buildComplete, setBuildComplete] = useState(false);
+  const [wireToolActive, setWireToolActive] = useState(false);
 
-  const wireComplete = (wire: WireType) =>
-    USER_SEGMENTS.every(([f, t]) => connections.has(`${wire}_${f}_${t}`));
-  const allWiresComplete = (['phase', 'neutral', 'earth'] as WireType[]).every(wireComplete);
+  const [draggingToolId, setDraggingToolId] = useState<string | null>(null);
+  const [ghostPos, setGhostPos] = useState({ x:0, y:0 });
 
-  // ── Init scene ──
+  const orbitRef = useRef<any>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    if (!containerRef.current) return;
-    const { scene, camera, renderer, controls, cleanup } = initBasicScene(containerRef.current);
-    sceneRef.current = scene;
-    scene.background = new THREE.Color(0xd0eaf8);
-    scene.fog = new THREE.FogExp2(0xd0eaf8, 0.012);
-    camera.position.set(0, 10, 24);
-    camera.fov = 52;
-    camera.updateProjectionMatrix();
-    controls.target.set(0, 4, 0);
-    controls.maxPolarAngle = Math.PI / 2.1;
+    setVoltMessage('🔧 Drag the electrical components from the toolkit into the house to build the wiring system!');
+  }, []);
 
-    buildFullScene(scene, refs3d.current);
-    setVoltMessage('🏠 Home Wiring Sim! Place the electrical components, then connect the wires to power the house!');
+  useEffect(() => {
+    if (REQUIRED_ITEMS.every(id => placedItems.has(id))) {
+      setBuildComplete(true);
+      setVoltMessage('✅ All components placed! Click the 〰️ Wire Tool then drag wires between components!');
+    }
+  }, [placedItems]);
 
-    let frameId: number;
-    const animate = () => {
-      frameId = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
+  const handleSuccessfulConnection = useCallback((idx: number) => {
+    const key = CONNECTION_FLOW[idx];
+    const newConns = [...connections, key];
+    setConnections(newConns);
+    setStep(newConns.length);
+    setShowExplanation(true);
+    addScore(60);
+
+    if (idx === 0) setVoltMessage('✅ Meter → Main Switch! Phase (Red) + Neutral (Blue) + Earth (Green) wires connected safely!');
+    if (idx === 1) setVoltMessage('✅ Switch → MCB! Power now enters the distribution board — each room gets its own breaker!');
+    if (idx === 2) {
+      setVoltMessage('⭐ All connections made! The house is FULLY wired — lights on!');
+      setTimeout(() => {
+        setLevelComplete(true);
+        addStar();
+        addScore(100);
+      }, 1200);
+    }
+  }, [connections, setLevelComplete, addScore, addStar, setVoltMessage]);
+
+  const handleFailedConnection = useCallback(() => {
+    setVoltMessage('❌ Wrong connection! Follow the flow: Meter → Main Switch → MCB Panel → House');
+  }, [setVoltMessage]);
+
+  const handleContinue = () => setShowExplanation(false);
+
+  // Toolkit drag
+  const handleItemDragStart = useCallback((id: string) => {
+    setDraggingToolId(id);
+    document.body.style.cursor = 'grabbing';
+  }, []);
+  const handleItemDragEnd = useCallback((id: string) => {
+    setDraggingToolId(null);
+    document.body.style.cursor = 'default';
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => { if (draggingToolId) setGhostPos({ x:e.clientX, y:e.clientY }); };
+    const onUp = (e: PointerEvent) => {
+      if (!draggingToolId) return;
+      const toolId = draggingToolId;
+      setDraggingToolId(null);
+      document.body.style.cursor = 'default';
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      if (e.clientX >= rect.left && e.clientX <= rect.right &&
+          e.clientY >= rect.top  && e.clientY <= rect.bottom) {
+        setPlacedItems(prev => { const n = new Set(prev); n.add(toolId); return n; });
+      }
     };
-    animate();
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+  }, [draggingToolId]);
 
-    return () => { cancelAnimationFrame(frameId); cleanup(); sceneRef.current = null; };
-  }, []);
-
-  // ── Toast helper ──
-  const showFeedback = useCallback((text: string, type: 'success' | 'error' | 'info') => {
-    setFeedback({ text, type });
-    setTimeout(() => setFeedback(null), 3400);
-  }, []);
-
-  // ── Place a component ──
-  const placeComponent = useCallback((id: ComponentId) => {
-    if (placedComponents.has(id)) return;
-    const obj = refs3d.current[`${id}3d`];
-    if (obj) obj.visible = true;
-    setPlacedComponents(prev => {
-      const next = new Set(prev);
-      next.add(id);
+  const toggleWireTool = () => {
+    setWireToolActive(prev => {
+      const next = !prev;
+      setVoltMessage(next
+        ? '〰️ Wire Tool ON! Click the glowing ◉ node then drag to the next component!'
+        : 'Wire tool off. Click it again to re-enable.');
       return next;
     });
-    addScore(20);
-    const info = COMPONENT_INFO[id];
-    showFeedback(`✅ ${info.title} placed! ${info.tip}`, 'success');
-    setVoltMessage(`✅ ${info.title} installed! ${info.tip}`);
-  }, [placedComponents, addScore, showFeedback, setVoltMessage]);
+  };
 
-  // ── Handle node click for wiring ──
-  const handleNodeClick = useCallback((node: NodeId) => {
-    if (phase !== 'wire' || !selectedWire) return;
-
-    if (node === 'pole') {
-      showFeedback('🗼 Pole is pre-connected by the utility. Start from Meter!', 'info');
-      return;
+  const hint = useMemo(() => {
+    if (!buildComplete) {
+      const rem = REQUIRED_ITEMS.filter(id => !placedItems.has(id));
+      if (rem.length === REQUIRED_ITEMS.length) return 'Drag components from here into the scene!';
+      const labels: Record<string,string> = { meter:'Meter', switch:'Main Switch', mcb:'MCB Panel' };
+      if (rem.length > 0) return `Still need: ${rem.map(id => labels[id]).join(', ')}`;
     }
+    if (!wireToolActive) return 'All placed! Click the 〰️ Wire Tool to start wiring!';
+    if (step === 0) return 'Click the cyan ◉ on the Meter and drag to the Main Switch!';
+    if (step === 1) return 'Click the cyan ◉ on the Main Switch and drag to the MCB Panel!';
+    if (step === 2) return 'Last wire! Click the MCB ◉ and drag to the House Circuit!';
+    return '⚡ House fully wired! Lights are on!';
+  }, [buildComplete, placedItems, wireToolActive, step]);
 
-    if ((node === 'meter' && !placedComponents.has('meter')) ||
-        (node === 'switch' && !placedComponents.has('switch')) ||
-        (node === 'mcb'    && !placedComponents.has('mcb'))) {
-      showFeedback(`❌ Place the ${NODE_LABELS[node]} component first!`, 'error');
-      const scene = sceneRef.current;
-      if (scene) createSpark(scene, new THREE.Vector3(-7.6, 4, -3));
-      return;
-    }
-
-    if (!connectingFrom) {
-      if (node === 'house') {
-        showFeedback('🏠 House is the endpoint. Select a source component first.', 'info');
-        return;
-      }
-      setConnectingFrom(node);
-      showFeedback(`📌 ${NODE_LABELS[node]} selected. Now click the next component.`, 'info');
-      return;
-    }
-
-    if (connectingFrom === node) {
-      setConnectingFrom(null);
-      showFeedback('ℹ️ Deselected. Click a component to start wiring.', 'info');
-      return;
-    }
-
-    const key        = `${selectedWire}_${connectingFrom}_${node}`;
-    const reverseKey = `${selectedWire}_${node}_${connectingFrom}`;
-
-    if (connections.has(key) || connections.has(reverseKey)) {
-      setConnectingFrom(null);
-      showFeedback('✅ This wire is already connected!', 'info');
-      return;
-    }
-
-    const validPair = ADJACENT.find(
-      ([f, t]) => (f === connectingFrom && t === node) || (f === node && t === connectingFrom),
-    );
-
-    if (!validPair) {
-      setConnectingFrom(null);
-      const scene = sceneRef.current;
-      if (scene) createSpark(scene, new THREE.Vector3(-6, 5, -2));
-      showFeedback('⚡ Invalid connection! Components must be adjacent: Pole→Meter→Switch→MCB→House.', 'error');
-      setVoltMessage('⚡ Wrong connection! Follow the flow: Pole → Meter → Switch → MCB → House');
-      return;
-    }
-
-    const [from, to] = validPair;
-    const isUserSegment = USER_SEGMENTS.some(([f, t]) => f === from && t === to);
-    if (!isUserSegment) {
-      setConnectingFrom(null);
-      showFeedback('🗼 Pole → Meter is pre-wired by the utility. Move on!', 'info');
-      return;
-    }
-
-    const canonKey = `${selectedWire}_${from}_${to}`;
-
-    // Check missing earth warning
-    if (selectedWire !== 'earth' && from === 'mcb' && to === 'house') {
-      const earthDone = wireComplete('earth');
-      if (!earthDone && connections.size >= totalRequired - 3) {
-        showFeedback('⚠️ Warning: Don\'t forget the Earth wire! Missing earth = shock hazard!', 'error');
-      }
-    }
-
-    // Draw in 3D
-    const scene = sceneRef.current;
-    if (scene && !wireMeshes.current[canonKey]) {
-      const pts = getWirePath(from, to, selectedWire);
-      if (pts.length >= 2) {
-        const mesh = addTube(scene, pts, WIRE_META[selectedWire].three, 0.065);
-        wireMeshes.current[canonKey] = mesh;
-      }
-    }
-
-    setConnections(prev => {
-      const next = new Set(prev);
-      next.add(canonKey);
-      return next;
-    });
-    setConnectingFrom(null);
-    addScore(25);
-
-    const tip = WIRE_TIPS[canonKey] ?? `✅ ${WIRE_META[selectedWire].name} wire: ${NODE_LABELS[from]} → ${NODE_LABELS[to]}`;
-    showFeedback(tip, 'success');
-    setVoltMessage(tip);
-  }, [phase, selectedWire, connectingFrom, connections, placedComponents, wireComplete, addScore, showFeedback, setVoltMessage, totalRequired]);
-
-  // ── Transition to wiring phase ──
-  useEffect(() => {
-    if (allComponentsPlaced && phase === 'place') {
-      setPhase('wire');
-      setVoltMessage('🔌 All components placed! Select a wire type and connect: Meter → Switch → MCB → House');
-    }
-  }, [allComponentsPlaced, phase]);
-
-  // ── Check completion ──
-  useEffect(() => {
-    if (!allWiresComplete || circuitComplete || !allComponentsPlaced) return;
-    completedRef.current = true;
-    setCircuitComplete(true);
-    setPhase('done');
-
-    const scene = sceneRef.current;
-    if (scene) {
-      // Light up all bulbs
-      ['bulb', 'bulb2', 'bulb3'].forEach((key, i) => {
-        const bulb = refs3d.current[key];
-        if (bulb) {
-          const mat = (bulb as THREE.Mesh).material as THREE.MeshStandardMaterial;
-          mat.color.setHex(0xffff88);
-          mat.emissive.setHex(0xffee44);
-          mat.emissiveIntensity = 2.0;
-        }
-        const light = refs3d.current[`${key}Light`] as THREE.PointLight;
-        if (light) light.intensity = i === 0 ? 5 : 3.5;
-      });
-
-      // Glow service cable
-      const cable = refs3d.current['serviceCable'] as THREE.Mesh;
-      if (cable) {
-        const mat = cable.material as THREE.MeshStandardMaterial;
-        mat.color.setHex(0xffcc00);
-        mat.emissive.setHex(0xffcc00);
-        mat.emissiveIntensity = 0.7;
-      }
-
-      // Animate wire pulse
-      const allWires = Object.values(wireMeshes.current);
-      createFlowParticles(scene, allWires);
-    }
-
-    setTimeout(() => {
-      setLevelComplete(true);
-      addStar();
-      addScore(150);
-      setVoltMessage('🎉 House fully wired! All lights on — 240V flowing safely through Phase, Neutral & Earth!');
-    }, 1200);
-  }, [allWiresComplete, allComponentsPlaced, circuitComplete]);
-
-  const wireTypes: WireType[] = ['phase', 'neutral', 'earth'];
+  const explanationStep = Math.min(step - 1, STEP_EXPLANATIONS.length - 1);
+  const currentExplanation = STEP_EXPLANATIONS[Math.max(0, explanationStep)];
+  const ghostItem = draggingToolId ? TOOLKIT_ITEMS.find(i => i.id === draggingToolId) ?? null : null;
 
   return (
     <div className="w-full h-full relative overflow-hidden">
-      <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg,#d0eaf8 0%,#b8d8ee 100%)' }} />
-      <div ref={containerRef} className="absolute inset-0 z-0" />
+      <div className="absolute inset-0"
+        style={{ background:'linear-gradient(180deg,#d0eaf8 0%,#c8dff0 50%,#b8d0e8 100%)' }} />
 
-      {/* ── Feedback Toast ── */}
+      {/* 3-D Canvas */}
+      <div ref={canvasRef} className="absolute inset-0">
+        <Canvas style={{ width:'100%', height:'100%' }} camera={{ position:[0, 10, 24], fov:52 }} shadows>
+          <ambientLight intensity={0.7} />
+          <directionalLight position={[8, 14, 8]} intensity={1.1} castShadow />
+          <pointLight position={[0, 10, 0]} color="#fff5cc" intensity={step >= 3 ? 4 : 0} distance={30} />
+          <OrbitControls ref={orbitRef} enablePan={false} minDistance={6} maxDistance={38}
+            maxPolarAngle={Math.PI / 2.15} target={[0, 4, 0]} />
+          <SceneContent
+            connections={connections} showExplanation={showExplanation} orbitRef={orbitRef}
+            placedItems={placedItems} buildComplete={buildComplete}
+            wireToolActive={wireToolActive} draggingToolId={draggingToolId}
+            onSuccessfulConnection={handleSuccessfulConnection}
+            onFailedConnection={handleFailedConnection}
+          />
+        </Canvas>
+      </div>
+
+      <DragGhost item={ghostItem} pos={ghostPos} />
+
+      <ToolkitPanel
+        placedItems={placedItems} buildComplete={buildComplete}
+        wireToolActive={wireToolActive} onToggleWireTool={toggleWireTool}
+        draggingToolId={draggingToolId}
+        onItemDragStart={handleItemDragStart} onItemDragEnd={handleItemDragEnd}
+        hint={hint}
+      />
+
+      {/* Explanation popup */}
       <AnimatePresence>
-        {feedback && (
+        {showExplanation && step > 0 && step <= 3 && (
           <motion.div
-            key={feedback.text}
-            initial={{ opacity: 0, y: -18 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -18 }}
-            className="absolute top-16 left-1/2 z-50 pointer-events-none"
-            style={{ transform: 'translateX(-50%)' }}
+            initial={{ opacity:0, scale:0.85 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0, scale:0.85 }}
+            className="absolute inset-0 z-50 flex items-center justify-center pointer-events-auto"
+            style={{ background:'rgba(0,0,0,0.18)' }}
           >
-            <div
-              className="px-5 py-3 rounded-2xl font-bold shadow-xl"
-              style={{
-                fontSize: '0.88rem',
-                background:
-                  feedback.type === 'success' ? '#dcfce7'
-                  : feedback.type === 'error' ? '#fee2e2'
-                  : '#eff6ff',
-                color:
-                  feedback.type === 'success' ? '#166534'
-                  : feedback.type === 'error' ? '#991b1b'
-                  : '#1e40af',
-                border: `2px solid ${feedback.type === 'success' ? '#22c55e' : feedback.type === 'error' ? '#ef4444' : '#3b82f6'}`,
-                maxWidth: 400,
-                textAlign: 'center',
-              }}
-            >
-              {feedback.text}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── LEFT: Toolkit Panel ── */}
-      <div
-        className="absolute left-0 top-0 bottom-0 z-10 flex flex-col pointer-events-auto overflow-hidden"
-        style={{
-          width: 'clamp(220px, 25vw, 290px)',
-          background: 'rgba(255,255,255,0.97)',
-          borderRight: '1px solid #e2e8f0',
-          boxShadow: '4px 0 20px rgba(0,0,0,0.09)',
-        }}
-      >
-        {/* Header */}
-        <div
-          className="px-4 py-3 font-bold text-white flex items-center gap-2 flex-shrink-0"
-          style={{
-            background: phase === 'done'
-              ? 'linear-gradient(135deg,#22c55e,#16a34a)'
-              : phase === 'wire'
-              ? 'linear-gradient(135deg,#f59e0b,#d97706)'
-              : 'linear-gradient(135deg,#3b82f6,#2563eb)',
-            fontSize: '0.98rem',
-          }}
-        >
-          {phase === 'place' ? '🔧 Toolkit — Place Components' : phase === 'wire' ? '🔌 Connect the Wires' : '✅ House Powered!'}
-        </div>
-
-        <div className="flex-1 px-3 py-3 flex flex-col gap-3 overflow-y-auto">
-
-          {/* Components section */}
-          <div>
-            <p className="font-bold uppercase tracking-widest mb-2 px-1"
-              style={{ fontSize: '0.6rem', color: '#94a3b8', letterSpacing: '0.1em' }}>
-              Components
-            </p>
-            {(['meter', 'switch', 'mcb'] as ComponentId[]).map(id => {
-              const placed = placedComponents.has(id);
-              const info = COMPONENT_INFO[id];
-              return (
-                <motion.button
-                  key={id}
-                  onClick={() => { if (!placed) placeComponent(id); }}
-                  whileHover={!placed ? { scale: 1.02, x: 3 } : {}}
-                  whileTap={!placed ? { scale: 0.97 } : {}}
-                  className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl w-full text-left mb-1.5"
-                  style={{
-                    background: placed ? '#f0fdf4' : '#f8fafc',
-                    border: `2px solid ${placed ? '#86efac' : '#e2e8f0'}`,
-                    cursor: placed ? 'default' : 'pointer',
-                  }}
-                >
-                  <span style={{ fontSize: '1.25rem' }}>{info.icon}</span>
-                  <div className="flex-1">
-                    <p className="font-bold" style={{ fontSize: '0.87rem', color: placed ? '#059669' : '#334155' }}>
-                      {info.title}
-                    </p>
-                    <p style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
-                      {placed ? '✓ Snapped into position' : 'Click to drag & place'}
-                    </p>
-                  </div>
-                  {placed && <span style={{ color: '#22c55e', fontWeight: 700 }}>✓</span>}
-                </motion.button>
-              );
-            })}
-          </div>
-
-          {/* Wire type selector */}
-          {(phase === 'wire' || phase === 'done') && (
-            <div>
-              <p className="font-bold uppercase tracking-widest mb-2 px-1"
-                style={{ fontSize: '0.6rem', color: '#94a3b8', letterSpacing: '0.1em' }}>
-                Wire Type
-              </p>
-              {wireTypes.map(w => {
-                const meta = WIRE_META[w];
-                const done = wireComplete(w);
-                const active = selectedWire === w;
-                return (
-                  <motion.button
-                    key={w}
-                    onClick={() => {
-                      if (phase !== 'wire') return;
-                      setSelectedWire(w);
-                      setConnectingFrom(null);
-                    }}
-                    whileHover={!done ? { scale: 1.02 } : {}}
-                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl w-full text-left mb-1.5"
-                    style={{
-                      background: done ? '#f0fdf4' : active ? `${meta.color}18` : '#f8fafc',
-                      border: `2.5px solid ${done ? '#86efac' : active ? meta.color : '#e2e8f0'}`,
-                      cursor: done ? 'default' : 'pointer',
-                    }}
-                  >
-                    <div
-                      className="rounded-full flex-shrink-0"
-                      style={{ width: 14, height: 14, background: meta.color, boxShadow: `0 0 7px ${meta.color}` }}
-                    />
-                    <div className="flex-1">
-                      <p className="font-bold" style={{ fontSize: '0.84rem', color: done ? '#059669' : active ? meta.color : '#334155' }}>
-                        {meta.name} Wire
-                      </p>
-                      <p style={{ fontSize: '0.67rem', color: '#94a3b8' }}>{meta.label}</p>
-                    </div>
-                    {done && <span style={{ color: '#22c55e', fontSize: '0.82rem', fontWeight: 700 }}>✓✓✓</span>}
-                    {active && !done && <span style={{ fontSize: '0.68rem', color: meta.color, fontWeight: 700 }}>ACTIVE</span>}
-                  </motion.button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Circuit node buttons */}
-          {(phase === 'wire' || phase === 'done') && (
-            <div>
-              <p className="font-bold uppercase tracking-widest mb-2 px-1"
-                style={{ fontSize: '0.6rem', color: '#94a3b8', letterSpacing: '0.1em' }}>
-                {selectedWire ? `Connect ${WIRE_META[selectedWire].name} Wire` : 'Select wire type above ↑'}
-              </p>
-              <div className="flex flex-col gap-1.5">
-                {(['pole', 'meter', 'switch', 'mcb', 'house'] as NodeId[]).map((node, idx) => {
-                  const isFrom = connectingFrom === node;
-                  const isPlaced =
-                    node === 'pole' || node === 'house' || placedComponents.has(node as ComponentId);
-                  const color = selectedWire ? WIRE_META[selectedWire].color : '#94a3b8';
-                  return (
-                    <React.Fragment key={node}>
-                      <motion.button
-                        onClick={() => handleNodeClick(node)}
-                        whileHover={selectedWire && isPlaced ? { scale: 1.03, x: 2 } : {}}
-                        whileTap={selectedWire && isPlaced ? { scale: 0.97 } : {}}
-                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl w-full text-left"
-                        style={{
-                          background: isFrom ? `${color}22` : isPlaced ? '#f8fafc' : '#f1f5f9',
-                          border: `2px solid ${isFrom ? color : isPlaced ? '#cbd5e1' : '#e2e8f0'}`,
-                          boxShadow: isFrom ? `0 0 14px ${color}55` : 'none',
-                          cursor: selectedWire && isPlaced ? 'pointer' : 'default',
-                          opacity: isPlaced ? 1 : 0.45,
-                        }}
-                      >
-                        <span style={{ fontSize: '1rem' }}>{NODE_ICONS[node]}</span>
-                        <span className="font-bold flex-1" style={{ fontSize: '0.81rem', color: isFrom ? color : '#334155' }}>
-                          {NODE_LABELS[node]}
-                        </span>
-                        {isFrom && <span style={{ fontSize: '0.65rem', fontWeight: 700, color }}>FROM</span>}
-                        {node === 'pole' && <span style={{ fontSize: '0.62rem', color: '#16a34a', fontWeight: 700 }}>Pre-wired</span>}
-                      </motion.button>
-
-                      {/* Segment connector line */}
-                      {idx < 4 && selectedWire && (() => {
-                        const nextNode = (['pole', 'meter', 'switch', 'mcb', 'house'] as NodeId[])[idx + 1];
-                        const segKey = `${selectedWire}_${node}_${nextNode}`;
-                        const isConnected = connections.has(segKey);
-                        const isPreWired = node === 'pole';
-                        return (
-                          <div className="flex items-center gap-1 px-3">
-                            <div
-                              className="flex-1 rounded-full"
-                              style={{
-                                height: 4,
-                                background: isConnected || isPreWired
-                                  ? WIRE_META[selectedWire].color
-                                  : '#e2e8f0',
-                                boxShadow: isConnected ? `0 0 6px ${WIRE_META[selectedWire].color}` : 'none',
-                                transition: 'background 0.4s',
-                              }}
-                            />
-                            {(isConnected || isPreWired) && (
-                              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: WIRE_META[selectedWire].color }}>✓</span>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Wire legend */}
-          <div className="rounded-xl p-3 mt-1" style={{ background: '#fafafa', border: '1.5px solid #e2e8f0' }}>
-            <p className="font-bold text-slate-700 mb-2" style={{ fontSize: '0.79rem' }}>
-              🔴🔵🟢 Wire Color Code
-            </p>
-            {wireTypes.map(w => (
-              <div key={w} className="flex items-center gap-2 mb-1.5">
-                <div className="rounded-full flex-shrink-0"
-                  style={{ width: 10, height: 10, background: WIRE_META[w].color, boxShadow: `0 0 5px ${WIRE_META[w].color}` }} />
-                <span style={{ fontSize: '0.7rem', color: '#475569' }}>
-                  <strong>{WIRE_META[w].name}:</strong> {WIRE_META[w].label}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {/* Safety tips */}
-          <div className="rounded-xl p-3" style={{ background: '#fef9c3', border: '1.5px solid #fde047' }}>
-            <p className="font-bold mb-1" style={{ fontSize: '0.75rem', color: '#854d0e' }}>⚠️ Safety Rules</p>
-            <p style={{ fontSize: '0.68rem', color: '#713f12', lineHeight: 1.5 }}>
-              • Always turn Main Switch OFF before work<br />
-              • Earth wire is mandatory — no exceptions<br />
-              • Phase (Red) = 240V live — never touch!<br />
-              • MCB trips in 0.01s to prevent fires
-            </p>
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        <div className="px-4 py-3 border-t border-slate-100 flex-shrink-0">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="font-bold text-slate-700" style={{ fontSize: '0.8rem' }}>
-              {phase === 'place' ? 'Components Placed' : 'Wiring Progress'}
-            </span>
-            <span className="font-bold" style={{
-              color: circuitComplete ? '#059669' : phase === 'place' ? '#3b82f6' : '#f59e0b',
-              fontSize: '0.88rem',
-            }}>
-              {phase === 'place'
-                ? `${placedComponents.size}/3`
-                : `${connectedCount}/${totalRequired}`}
-            </span>
-          </div>
-          <div className="rounded-full overflow-hidden" style={{ height: 8, background: '#e2e8f0' }}>
             <motion.div
-              className="h-full rounded-full"
-              style={{ background: circuitComplete ? 'linear-gradient(90deg,#22c55e,#10b981)' : 'linear-gradient(90deg,#3b82f6,#06b6d4)' }}
-              animate={{
-                width: phase === 'place'
-                  ? `${(placedComponents.size / 3) * 100}%`
-                  : `${progress}%`,
-              }}
-              transition={{ duration: 0.4 }}
-            />
-          </div>
-          {circuitComplete && (
-            <p className="text-center font-bold text-green-600 mt-1.5" style={{ fontSize: '0.82rem' }}>
-              🎉 House fully powered!
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* ── RIGHT: Info & Wire Status Panel ── */}
-      <div
-        className="absolute right-3 top-14 bottom-3 z-10 flex flex-col gap-3 pointer-events-auto overflow-y-auto"
-        style={{ width: 'clamp(195px, 21vw, 260px)', paddingBottom: '0.25rem' }}
-      >
-        <InfoCard title="Home Wiring" icon="🏠" colorClass="from-orange-600 to-amber-500">
-          <p><strong>Circuit Flow:</strong></p>
-          <p style={{ fontSize: '0.75rem' }}>Pole → Meter → Switch → MCB → House</p>
-          <p className="mt-1"><strong>Phase (Red):</strong> 240V live — powers everything.</p>
-          <p><strong>Neutral (Blue):</strong> Returns current safely.</p>
-          <p><strong>Earth (Green):</strong> Fault-current safety path.</p>
-        </InfoCard>
-
-        {/* Wire status cards */}
-        {wireTypes.map(w => {
-          const done = wireComplete(w);
-          const meta = WIRE_META[w];
-          const count = USER_SEGMENTS.filter(([f, t]) => connections.has(`${w}_${f}_${t}`)).length;
-          return (
-            <div
-              key={w}
-              className="game-panel"
-              style={{ border: `2px solid ${done ? meta.color : '#e2e8f0'}` }}
-            >
-              <div className="flex items-center gap-2 mb-1.5">
-                <div className="rounded-full"
-                  style={{ width: 12, height: 12, background: meta.color, boxShadow: `0 0 6px ${meta.color}` }} />
-                <span className="font-bold text-slate-800" style={{ fontSize: '0.86rem' }}>
-                  {meta.name} Wire
-                </span>
-                {done && <span style={{ color: meta.color, fontSize: '0.8rem', marginLeft: 'auto', fontWeight: 700 }}>✓ Done</span>}
-              </div>
-              <div className="flex gap-1 mb-1">
-                {USER_SEGMENTS.map(([f, t]) => {
-                  const segKey = `${w}_${f}_${t}`;
-                  const connected = connections.has(segKey);
-                  return (
-                    <div
-                      key={segKey}
-                      className="flex-1 rounded-full"
-                      style={{
-                        height: 6,
-                        background: connected ? meta.color : '#e2e8f0',
-                        boxShadow: connected ? `0 0 5px ${meta.color}` : 'none',
-                        transition: 'background 0.3s',
-                      }}
-                    />
-                  );
-                })}
-              </div>
-              <div className="flex justify-between">
-                {USER_SEGMENTS.map(([f, t]) => (
-                  <span key={`${f}_${t}`} style={{ fontSize: '0.58rem', color: '#94a3b8' }}>
-                    {NODE_ICONS[f]}→{NODE_ICONS[t]}
-                  </span>
-                ))}
-              </div>
-              <p style={{ fontSize: '0.67rem', color: '#94a3b8', marginTop: 4 }}>
-                {count}/{USER_SEGMENTS.length} segments connected
-              </p>
-            </div>
-          );
-        })}
-
-        {/* Bulb status card */}
-        <div className="game-panel" style={{ border: `2px solid ${circuitComplete ? '#fbbf24' : '#e2e8f0'}` }}>
-          <div className="flex items-center gap-2">
-            <span style={{ fontSize: '1.4rem' }}>💡</span>
-            <div>
-              <p className="font-bold text-slate-800" style={{ fontSize: '0.86rem' }}>House Bulbs</p>
-              <p style={{ fontSize: '0.7rem', color: circuitComplete ? '#d97706' : '#94a3b8', fontWeight: circuitComplete ? 700 : 400 }}>
-                {circuitComplete ? '✨ Glowing — circuit complete!' : 'Off — complete wiring to power on'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Bottom animated hint ── */}
-      <AnimatePresence>
-        {!circuitComplete && phase === 'place' && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="absolute bottom-5 z-20 pointer-events-none"
-            style={{
-              left: 'clamp(220px, 25vw, 290px)',
-              right: 'clamp(195px, 21vw, 260px)',
-              display: 'flex',
-              justifyContent: 'center',
-            }}
-          >
-            <motion.div animate={{ y: [0, -7, 0] }} transition={{ duration: 1.3, repeat: Infinity }}>
-              <div
-                className="px-5 py-2.5 rounded-full font-bold text-slate-900"
-                style={{
-                  background: 'linear-gradient(135deg,#ffd700,#f59e0b)',
-                  fontSize: '0.88rem',
-                  boxShadow: '0 0 18px rgba(255,215,0,0.5)',
-                }}
-              >
-                👈 Click components to snap them into the house!
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-        {!circuitComplete && phase === 'wire' && !selectedWire && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="absolute bottom-5 z-20 pointer-events-none"
-            style={{
-              left: 'clamp(220px, 25vw, 290px)',
-              right: 'clamp(195px, 21vw, 260px)',
-              display: 'flex',
-              justifyContent: 'center',
-            }}
-          >
-            <motion.div animate={{ y: [0, -7, 0] }} transition={{ duration: 1.3, repeat: Infinity }}>
-              <div
-                className="px-5 py-2.5 rounded-full font-bold text-slate-900"
-                style={{
-                  background: 'linear-gradient(135deg,#ffd700,#f59e0b)',
-                  fontSize: '0.88rem',
-                  boxShadow: '0 0 18px rgba(255,215,0,0.5)',
-                }}
-              >
-                👈 Choose a wire colour to start connecting!
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-        {!circuitComplete && phase === 'wire' && selectedWire && connectingFrom && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="absolute bottom-5 z-20 pointer-events-none"
-            style={{
-              left: 'clamp(220px, 25vw, 290px)',
-              right: 'clamp(195px, 21vw, 260px)',
-              display: 'flex',
-              justifyContent: 'center',
-            }}
-          >
-            <div
-              className="px-5 py-2.5 rounded-full font-bold"
+              initial={{ y:30 }} animate={{ y:0 }}
+              className="flex flex-col items-center gap-4 px-8 py-7 rounded-3xl"
               style={{
-                background: WIRE_META[selectedWire].color,
-                color: '#fff',
-                fontSize: '0.88rem',
-                boxShadow: `0 0 18px ${WIRE_META[selectedWire].color}88`,
+                background:'rgba(255,255,255,0.97)', boxShadow:'0 8px 40px rgba(0,0,0,0.20)',
+                border:'3px solid #fbbf24', maxWidth:440, width:'90%',
               }}
             >
-              🔌 {NODE_LABELS[connectingFrom]} selected — click next component!
-            </div>
+              <div className={`w-full px-4 py-3 rounded-2xl bg-gradient-to-r ${currentExplanation.color} text-white text-center font-display font-bold`}
+                style={{ fontSize:'1.05rem' }}>
+                {currentExplanation.icon} {currentExplanation.title}
+              </div>
+              <p className="text-slate-700 leading-relaxed text-center" style={{ fontSize:'0.92rem' }}>
+                {currentExplanation.info}
+              </p>
+              <div className="px-4 py-2.5 rounded-xl w-full text-center"
+                style={{ background:'#fefce8', border:'1.5px solid #fde047' }}>
+                <p className="font-bold text-amber-700" style={{ fontSize:'1rem' }}>
+                  {currentExplanation.formula}
+                </p>
+                <p style={{ fontSize:'0.78rem', color:'#92400e' }}>{currentExplanation.formulaNote}</p>
+              </div>
+              <motion.button
+                whileHover={{ scale:1.04 }} whileTap={{ scale:0.97 }}
+                onClick={handleContinue}
+                className="px-8 py-3 rounded-2xl font-display font-bold text-white"
+                style={{ background:'linear-gradient(135deg,#f59e0b,#fbbf24)', fontSize:'1rem',
+                  boxShadow:'0 4px 16px rgba(245,158,11,0.4)' }}
+              >
+                {step < 3 ? 'Continue Wiring →' : '🏠 House Powered!'}
+              </motion.button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
