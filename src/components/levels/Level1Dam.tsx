@@ -410,7 +410,7 @@ const SummaryCard = ({ onNext }: { onNext: () => void }) => (
             boxShadow: '0 4px 20px rgba(37,99,235,0.5)',
           }}
         >
-          🚀 Continue to Level 2 →
+          Explore Generator in Detail
         </motion.button>
       </div>
     </motion.div>
@@ -447,7 +447,8 @@ const STEPS = [
 
 /* ── Main Level ── */
 export const Level1Dam = () => {
-  const { setVoltMessage, setLevelComplete, addScore, addStar } = useGameStore();
+  
+  const { setVoltMessage, setLevelComplete, addScore, addStar, nextLevel } = useGameStore();
   const [phase, setPhase] = useState(0);
   const [showSummary, setShowSummary] = useState(false);
   const [electricityDone, setElectricityDone] = useState(false);
@@ -484,9 +485,12 @@ export const Level1Dam = () => {
     setTimeout(() => setShowSummary(true), 400);
   };
 
+ 
+
   const handleSummaryNext = () => {
-    setShowSummary(false);
-  };
+  setShowSummary(false);
+  nextLevel(); // 🔥 THIS IS THE KEY
+};
 
   const currentStep = STEPS[Math.min(phase, STEPS.length - 1)];
 

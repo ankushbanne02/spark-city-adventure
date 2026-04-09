@@ -29,6 +29,10 @@ const LEVEL_COLORS: Record<number, string> = {
 export const GameHUD = () => {
   const { currentLevel, score, stars } = useGameStore();
   if (currentLevel === 0 || currentLevel === 9) return null;
+  
+
+  
+
 
   const color = LEVEL_COLORS[currentLevel] || '#3b82f6';
 
@@ -157,7 +161,7 @@ export const VoltGuide = () => {
 
 export const NextLevelButton = () => {
   const { levelComplete, nextLevel, currentLevel } = useGameStore();
-  if (currentLevel === 0 || currentLevel === 9) return null;
+  if (currentLevel === 0 || currentLevel === 1 || currentLevel === 9) return null;
 
   const NEXT_LABELS: Record<number, string> = {
     1: '⚙️ Explore the Generator',
