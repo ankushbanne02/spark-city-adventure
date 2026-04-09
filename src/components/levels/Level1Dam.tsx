@@ -273,76 +273,19 @@ const ElectricBolts = ({ on }: { on: boolean }) => {
   );
 };
 
-/* ── Animated electricity kV counter ── */
-const ElectricityCounter = ({ active, onDone }: { active: boolean; onDone: () => void }) => {
-  const [kv, setKv] = useState(0);
-  const [showFlow, setShowFlow] = useState(false);
+/* ── Electricity timer — silent, just triggers summary after delay ── */
+const ElectricityCounter = ({ active, onDone, hidden }: { active: boolean; onDone: () => void; hidden?: boolean }) => {
   const doneCalledRef = useRef(false);
 
   useEffect(() => {
-    if (!active) { setKv(0); setShowFlow(false); doneCalledRef.current = false; return; }
-
-    setShowFlow(true);
-    let val = 0;
-    const interval = setInterval(() => {
-      val += 2 + Math.random() * 4;
-      if (val >= 240) { val = 240; clearInterval(interval); }
-      setKv(Math.round(val));
-    }, 80);
-
+    if (!active) { doneCalledRef.current = false; return; }
     const timer = setTimeout(() => {
       if (!doneCalledRef.current) { doneCalledRef.current = true; onDone(); }
     }, 7500);
-
-    return () => { clearInterval(interval); clearTimeout(timer); };
+    return () => clearTimeout(timer);
   }, [active]);
 
-  if (!showFlow) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.5 }}
-      className="absolute left-1/2 -translate-x-1/2 z-30 pointer-events-none"
-      style={{ bottom: '22%' }}
-    >
-      <div style={{
-        background: 'linear-gradient(135deg, rgba(0,10,40,0.95), rgba(0,30,80,0.92))',
-        border: '2px solid #fbbf24',
-        borderRadius: 18,
-        padding: '14px 32px',
-        textAlign: 'center',
-        boxShadow: '0 0 40px rgba(255,200,0,0.55), 0 8px 32px rgba(0,0,0,0.5)',
-      }}>
-        <div style={{ color: '#94a3b8', fontSize: 11, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>
-          ⚡ ELECTRICITY GENERATED
-        </div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, justifyContent: 'center' }}>
-          <motion.span
-            key={kv}
-            initial={{ scale: 1.3 }}
-            animate={{ scale: 1 }}
-            style={{ color: '#fde047', fontSize: 52, fontWeight: 900, fontFamily: 'monospace', lineHeight: 1 }}
-          >
-            {kv}
-          </motion.span>
-          <span style={{ color: '#fbbf24', fontSize: 22, fontWeight: 700 }}>V AC</span>
-        </div>
-        <div style={{ color: '#22d3ee', fontSize: 13, marginTop: 4, fontWeight: 600 }}>
-          {kv >= 240 ? '✅ Full Output: 0.24 kV — Ready for Transmission!' : '📈 Building up power...'}
-        </div>
-        {/* Flow line animation */}
-        <div style={{ marginTop: 10, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-          <motion.div
-            animate={{ x: ['-100%', '100%'] }}
-            transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }}
-            style={{ height: '100%', width: '50%', background: 'linear-gradient(90deg, transparent, #fde047, transparent)', borderRadius: 3 }}
-          />
-        </div>
-      </div>
-    </motion.div>
-  );
+  return null;
 };
 
 /* ── Level Summary Card ── */
@@ -588,16 +531,16 @@ export const Level1Dam = () => {
         <Label3D position={[13, 11, -1.5]} text="🗼 Transmission Tower" color="#d1d5db" bg="rgba(20,20,20,0.82)" />
       </Canvas>
 
-      {/* Electricity counter animation */}
+      {/* Hidden timer — triggers summary after 7.5s when generating */}
       {generating && !electricityDone && (
-        <ElectricityCounter active={generating} onDone={handleElectricityDone} />
+        <ElectricityCounter active={generating} onDone={handleElectricityDone} hidden />
       )}
 
       {/* Summary card */}
       {showSummary && <SummaryCard onNext={handleSummaryNext} />}
 
       {/* Right panel */}
-      {!showSummary && !generating && (
+      {!showSummary && (
         <div
           className="absolute right-3 top-14 z-10 flex flex-col gap-3 pointer-events-auto"
           style={{ width: 'clamp(200px, 22vw, 280px)' }}
