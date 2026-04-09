@@ -720,10 +720,10 @@ const SceneContent = ({
         </Html>
       )}
 
-      {/* Static power lines (built phase) */}
-      {!isAnimating && step >= 1 && <PowerLine start={[-15,8.5,0]} end={[-8,8.5,0]} active />}
-      {!isAnimating && step >= 2 && <PowerLine start={[-8,8.5,0]} end={[0,8.5,0]} active />}
-      {!isAnimating && step >= 3 && <PowerLine start={[0,8.5,0]} end={[8,8.5,0]} active />}
+      {/* Static power lines (wiring phase — no glow, just connected wire) */}
+      {!isAnimating && step >= 1 && <PowerLine start={[-15,8.5,0]} end={[-8,8.5,0]} active={false} />}
+      {!isAnimating && step >= 2 && <PowerLine start={[-8,8.5,0]} end={[0,8.5,0]} active={false} />}
+      {!isAnimating && step >= 3 && <PowerLine start={[0,8.5,0]} end={[8,8.5,0]} active={false} />}
 
       {/* Animation power lines */}
       {isAnimating && <PowerLine start={[-15,8.5,0]} end={[-8,8.5,0]} active animActive={animLine0} speed={1.5} />}
@@ -735,10 +735,10 @@ const SceneContent = ({
       {isAnimating && <BoltTracer start={[-8,8.5,0]} end={[0,8.5,0]} active={animLine1} phase={animPhase} />}
       {isAnimating && <BoltTracer start={[0,8.5,0]} end={[8,8.5,0]} active={animLine2} phase={animPhase} />}
 
-      {/* Particles */}
-      {step >= 1 && <ElectricParticles start={[-15,8.5,0]} end={[-8,8.5,0]} active speed={isAnimating ? 1.2 : 0.45} />}
-      {step >= 2 && <ElectricParticles start={[-8,8.5,0]} end={[0,8.5,0]} active speed={isAnimating ? 1.2 : 0.45} />}
-      {step >= 3 && <ElectricParticles start={[0,8.5,0]} end={[8,8.5,0]} active speed={isAnimating ? 1.2 : 0.45} />}
+      {/* Particles — only during animation */}
+      {isAnimating && animLine0 && <ElectricParticles start={[-15,8.5,0]} end={[-8,8.5,0]} active speed={1.2} />}
+      {isAnimating && animLine1 && <ElectricParticles start={[-8,8.5,0]} end={[0,8.5,0]} active speed={1.2} />}
+      {isAnimating && animLine2 && <ElectricParticles start={[0,8.5,0]} end={[8,8.5,0]} active speed={1.2} />}
 
       {sparks.map(s => <SparkBurst key={s.id} position={s.pos} />)}
       {ripples.map(r => <GroundRipple key={r.id} position={r.pos} />)}
@@ -895,23 +895,23 @@ const AnimationOverlay = ({ phase, progress }: { phase: number; progress: number
   return (
     <div style={{
       position: 'absolute', inset: 0, zIndex: 30,
-      pointerEvents: 'none', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'flex-start', paddingTop: '16px',
+      pointerEvents: 'none',
     }}>
-      {/* Top progress bar */}
+      {/* Top-center progress bar */}
       <div style={{
-        width: '60%', maxWidth: '500px',
-        background: 'rgba(15,23,42,0.85)', borderRadius: '50px', padding: '4px 16px 8px',
+        position: 'absolute', top: '12px', left: '50%', transform: 'translateX(-50%)',
+        width: '50%', maxWidth: '420px',
+        background: 'rgba(15,23,42,0.88)', borderRadius: '50px', padding: '5px 16px 8px',
         backdropFilter: 'blur(12px)', border: '1.5px solid rgba(251,191,36,0.4)',
         boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-          <span style={{ color: '#fbbf24', fontWeight: 700, fontSize: '0.7rem', letterSpacing: '0.08em' }}>
-            ⚡ ELECTRICITY FLOW ANIMATION
+          <span style={{ color: '#fbbf24', fontWeight: 700, fontSize: '0.68rem', letterSpacing: '0.08em' }}>
+            ⚡ ELECTRICITY FLOW
           </span>
-          <span style={{ color: '#94a3b8', fontSize: '0.7rem', fontWeight: 600 }}>{totalProgress}%</span>
+          <span style={{ color: '#94a3b8', fontSize: '0.68rem', fontWeight: 600 }}>{totalProgress}%</span>
         </div>
-        <div style={{ background: 'rgba(30,41,59,0.8)', borderRadius: '8px', height: '6px', overflow: 'hidden' }}>
+        <div style={{ background: 'rgba(30,41,59,0.8)', borderRadius: '8px', height: '5px', overflow: 'hidden' }}>
           <motion.div
             style={{
               height: '100%', borderRadius: '8px',
@@ -923,86 +923,86 @@ const AnimationOverlay = ({ phase, progress }: { phase: number; progress: number
         </div>
       </div>
 
-      {/* Phase card */}
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={phase}
-          initial={{ opacity: 0, y: 20, scale: 0.92 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -20, scale: 0.92 }}
-          transition={{ duration: 0.45 }}
-          style={{
-            marginTop: '12px', width: 'min(520px, 90%)',
-            background: 'rgba(15,23,42,0.92)', backdropFilter: 'blur(16px)',
-            borderRadius: '20px', padding: '18px 24px',
-            border: `2px solid ${phaseData.color}66`,
-            boxShadow: `0 8px 32px rgba(0,0,0,0.35), 0 0 20px ${phaseData.color}22`,
-          }}
-        >
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px',
-          }}>
+      {/* Bottom-left: phase card */}
+      <div style={{
+        position: 'absolute', bottom: '16px', left: '12px',
+        width: 'min(340px, 40vw)',
+      }}>
+        {/* Flow path strip above the card */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap',
+          background: 'rgba(15,23,42,0.82)', borderRadius: '10px', padding: '5px 10px',
+          border: '1px solid rgba(99,102,241,0.35)', backdropFilter: 'blur(10px)',
+          marginBottom: '6px',
+        }}>
+          {[
+            { label: 'Dam', icon: '💧', active: true },
+            { label: '→', icon: '', active: true },
+            { label: 'Transformer', icon: '⚡', active: phase >= 0 },
+            { label: '→', icon: '', active: phase >= 0 },
+            { label: 'Tower 1', icon: '🗼', active: phase >= 1 },
+            { label: '→', icon: '', active: phase >= 1 },
+            { label: 'Tower 2', icon: '🗼', active: phase >= 2 },
+            { label: '→', icon: '', active: phase >= 2 },
+            { label: 'Tower 3', icon: '🗼', active: phase >= 3 },
+            { label: '→', icon: '', active: phase >= 3 },
+            { label: 'Substation', icon: '🏭', active: phase >= 4 },
+          ].map((item, i) => (
+            <span key={i} style={{
+              fontSize: '0.63rem',
+              color: item.active ? (item.icon ? '#fbbf24' : '#f59e0b') : '#475569',
+              fontWeight: item.active ? 700 : 400,
+              transition: 'color 0.4s',
+              whiteSpace: 'nowrap',
+            }}>
+              {item.icon ? `${item.icon} ` : ''}{item.label}
+            </span>
+          ))}
+        </div>
+
+        {/* Phase info card */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={phase}
+            initial={{ opacity: 0, x: -20, scale: 0.95 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: -20, scale: 0.95 }}
+            transition={{ duration: 0.35 }}
+            style={{
+              background: 'rgba(15,23,42,0.93)', backdropFilter: 'blur(16px)',
+              borderRadius: '16px', padding: '14px 16px',
+              border: `2px solid ${phaseData.color}66`,
+              boxShadow: `0 6px 24px rgba(0,0,0,0.4), 0 0 16px ${phaseData.color}18`,
+            }}
+          >
             <div style={{
-              background: `${phaseData.color}22`, border: `2px solid ${phaseData.color}`,
-              borderRadius: '12px', padding: '8px 14px',
-              color: phaseData.color, fontWeight: 800, fontSize: '1.05rem',
+              color: phaseData.color, fontWeight: 800, fontSize: '0.95rem',
+              marginBottom: '4px', lineHeight: 1.3,
             }}>
               {phaseData.title}
             </div>
-          </div>
-          <div style={{
-            display: 'inline-block', background: `${phaseData.color}15`,
-            color: phaseData.color, fontWeight: 700, fontSize: '0.78rem',
-            padding: '3px 10px', borderRadius: '20px', marginBottom: '8px',
-            border: `1px solid ${phaseData.color}44`,
-          }}>
-            {phaseData.subtitle}
-          </div>
-          <p style={{ color: '#cbd5e1', fontSize: '0.88rem', lineHeight: 1.6, margin: '0 0 10px' }}>
-            {phaseData.desc}
-          </p>
-          <div style={{
-            background: 'rgba(30,41,59,0.7)', borderRadius: '10px', padding: '8px 14px',
-            display: 'flex', alignItems: 'center', gap: '8px',
-          }}>
-            <span style={{ color: '#fbbf24', fontSize: '0.75rem', fontWeight: 700 }}>📐 Formula:</span>
-            <span style={{ color: '#f1f5f9', fontFamily: 'monospace', fontSize: '0.9rem', fontWeight: 600 }}>
-              {phaseData.formula}
-            </span>
-          </div>
-        </motion.div>
-      </AnimatePresence>
-
-      {/* Flow diagram at bottom */}
-      <div style={{
-        position: 'absolute', bottom: '72px', left: '50%', transform: 'translateX(-50%)',
-        display: 'flex', alignItems: 'center', gap: '6px',
-        background: 'rgba(15,23,42,0.85)', borderRadius: '50px', padding: '8px 18px',
-        border: '1.5px solid rgba(99,102,241,0.4)', backdropFilter: 'blur(10px)',
-      }}>
-        {[
-          { label: 'Dam', icon: '💧', active: true },
-          { label: '→', icon: '', active: true },
-          { label: 'Transformer', icon: '⚡', active: phase >= 0 },
-          { label: '→', icon: '', active: phase >= 0 },
-          { label: 'Tower 1', icon: '🗼', active: phase >= 1 },
-          { label: '→', icon: '', active: phase >= 1 },
-          { label: 'Tower 2', icon: '🗼', active: phase >= 2 },
-          { label: '→', icon: '', active: phase >= 2 },
-          { label: 'Tower 3', icon: '🗼', active: phase >= 3 },
-          { label: '→', icon: '', active: phase >= 3 },
-          { label: 'Substation', icon: '🏭', active: phase >= 4 },
-        ].map((item, i) => (
-          <span key={i} style={{
-            fontSize: item.icon ? '0.72rem' : '0.65rem',
-            color: item.active ? (item.icon ? '#fbbf24' : '#f59e0b') : '#475569',
-            fontWeight: item.active ? 700 : 400,
-            transition: 'color 0.4s',
-            whiteSpace: 'nowrap',
-          }}>
-            {item.icon ? `${item.icon} ` : ''}{item.label}
-          </span>
-        ))}
+            <div style={{
+              display: 'inline-block', background: `${phaseData.color}18`,
+              color: phaseData.color, fontWeight: 700, fontSize: '0.72rem',
+              padding: '2px 8px', borderRadius: '20px', marginBottom: '8px',
+              border: `1px solid ${phaseData.color}44`,
+            }}>
+              {phaseData.subtitle}
+            </div>
+            <p style={{ color: '#cbd5e1', fontSize: '0.8rem', lineHeight: 1.55, margin: '0 0 8px' }}>
+              {phaseData.desc}
+            </p>
+            <div style={{
+              background: 'rgba(30,41,59,0.75)', borderRadius: '8px', padding: '6px 12px',
+              display: 'flex', alignItems: 'center', gap: '6px',
+            }}>
+              <span style={{ color: '#fbbf24', fontSize: '0.7rem', fontWeight: 700 }}>📐</span>
+              <span style={{ color: '#f1f5f9', fontFamily: 'monospace', fontSize: '0.82rem', fontWeight: 600 }}>
+                {phaseData.formula}
+              </span>
+            </div>
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );
