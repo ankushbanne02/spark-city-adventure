@@ -4,7 +4,6 @@ import { OrbitControls, Environment, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/game-store';
-import { InfoCard } from '../GameUI';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -16,7 +15,6 @@ const TOWER_POSITIONS: [number, number, number][] = [
   [8, 0, 0],
 ];
 
-/** Wire attachment heights for each node */
 const NODE_ATTACH: Record<string, [number, number, number]> = {
   transformer: [-15, 8.5, 0],
   tower1:      [-8,  8.5, 0],
@@ -24,7 +22,6 @@ const NODE_ATTACH: Record<string, [number, number, number]> = {
   tower3:      [8,   8.5, 0],
 };
 
-/** The required order of connections */
 const CONNECTION_FLOW = ['transformer-tower1', 'tower1-tower2', 'tower2-tower3'] as const;
 
 const TOOLKIT_ITEMS = [
@@ -38,38 +35,61 @@ const TOOLKIT_ITEMS = [
 
 const REQUIRED_ITEMS = ['transformer', 'tower1', 'tower2', 'tower3', 'substation'];
 
-const STEP_EXPLANATIONS = [
+// Animation phases: each ~2 seconds
+const ANIM_PHASES = [
   {
-    title: 'Transformer → Tower 1 Connected!',
-    icon: '⚡',
-    color: 'from-amber-600 to-amber-400',
-    info: 'Great wiring! Electricity is stepped UP to 132,000 Volts (132 kV) by the transformer. High voltage = LOW current = far less heat wasted in the wires!',
-    formula: 'P_loss = I² × R',
-    formulaNote: 'Lower current = much less power loss!',
-  },
-  {
-    title: 'Tower 1 → Tower 2 Connected!',
-    icon: '🗼',
-    color: 'from-orange-600 to-amber-500',
-    info: 'Excellent! Electricity travels at near the speed of light through these wires. Transmission towers can be 50–100 m tall and carry power thousands of kilometres!',
+    id: 0,
+    duration: 2,
+    title: '⚡ Powering Up the Transformer',
+    subtitle: 'Voltage: 11 kV → 132 kV',
+    desc: 'The step-up transformer converts 11,000 Volts from the generator into 132,000 Volts. Higher voltage means LOWER current — and far less energy wasted as heat!',
+    color: '#f59e0b',
     formula: 'V₁/V₂ = N₁/N₂',
-    formulaNote: 'Transformer turns ratio controls voltage.',
   },
   {
-    title: 'Tower 2 → Tower 3 Connected!',
-    icon: '🗼',
-    color: 'from-yellow-600 to-amber-400',
-    info: 'Almost there! High-voltage lines carry electricity from power plants, over mountains and rivers, all the way to cities and towns!',
-    formula: '132 kV',
-    formulaNote: 'High-tension lines carry this voltage.',
+    id: 1,
+    duration: 2,
+    title: '🗼 Electricity Reaches Tower 1',
+    subtitle: 'Voltage: 132 kV | Current: Low',
+    desc: 'High-voltage electricity surges along the wire to the first transmission tower. Power loss = I²R — with low current, nearly all energy makes it through!',
+    color: '#f97316',
+    formula: 'P_loss = I² × R',
   },
   {
-    title: 'Network Complete! ⚡',
-    icon: '✅',
-    color: 'from-green-600 to-emerald-500',
-    info: 'Excellent! All 3 towers are connected. 132,000 Volts of electricity is flowing to Spark City! Next stop: the Substation, where voltage steps DOWN to safe levels.',
-    formula: 'Dam → Transformer → Towers → Substation',
-    formulaNote: 'Electricity journey continues!',
+    id: 2,
+    duration: 2,
+    title: '🗼 Crossing to Tower 2',
+    subtitle: 'Voltage: 132 kV | Distance: km',
+    desc: 'Electricity travels at near the speed of light through these wires! Towers stand 50–100 m tall, spanning valleys, rivers and mountains.',
+    color: '#eab308',
+    formula: 'Speed ≈ 3×10⁸ m/s',
+  },
+  {
+    id: 3,
+    duration: 2,
+    title: '🗼 Reaching Tower 3',
+    subtitle: 'Voltage: 132 kV | Network: 75%',
+    desc: 'The high-voltage lines carry power hundreds of kilometres with minimal waste. The transmission network connects entire regions to a single power source!',
+    color: '#84cc16',
+    formula: 'η = P_out / P_in × 100%',
+  },
+  {
+    id: 4,
+    duration: 2,
+    title: '🏭 Arriving at the Substation!',
+    subtitle: '132 kV → 11 kV Step-Down',
+    desc: 'The substation receives high-voltage power and steps it DOWN to safer levels. A step-down transformer now takes over — making electricity safe for homes and schools!',
+    color: '#818cf8',
+    formula: 'V_high → V_safe',
+  },
+  {
+    id: 5,
+    duration: 2,
+    title: '✅ Full Network Energised!',
+    subtitle: 'Spark City has Power! 🏙️',
+    desc: 'The entire transmission network is live! From the dam, through the transformer, across the towers, and into the substation — clean electricity is flowing to Spark City!',
+    color: '#22c55e',
+    formula: 'Dam → 132 kV → Substation → City',
   },
 ];
 
@@ -77,9 +97,9 @@ const STEP_EXPLANATIONS = [
 // VISUAL COMPONENTS (3-D)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PowerLine = ({ start, end, active, flash = false }: {
+const PowerLine = ({ start, end, active, animActive = false, speed = 1 }: {
   start: [number, number, number]; end: [number, number, number];
-  active: boolean; flash?: boolean;
+  active: boolean; animActive?: boolean; speed?: number;
 }) => {
   const matRef = useRef<THREE.MeshStandardMaterial>(null!);
   const curve = useMemo(() => new THREE.CatmullRomCurve3([
@@ -90,15 +110,20 @@ const PowerLine = ({ start, end, active, flash = false }: {
 
   useFrame(({ clock }) => {
     if (!matRef.current) return;
-    matRef.current.emissiveIntensity = flash
-      ? 0.5 + Math.sin(clock.getElapsedTime() * 18) * 0.5
-      : active ? 0.55 + Math.sin(clock.getElapsedTime() * 2) * 0.15 : 0;
+    const t = clock.getElapsedTime();
+    if (animActive) {
+      matRef.current.emissiveIntensity = 0.5 + Math.sin(t * 14 * speed) * 0.5;
+    } else {
+      matRef.current.emissiveIntensity = active ? 0.55 + Math.sin(t * 2) * 0.15 : 0;
+    }
   });
   return (
     <mesh>
       <tubeGeometry args={[curve, 20, 0.09, 8, false]} />
-      <meshStandardMaterial ref={matRef} color={active ? '#f59e0b' : '#888888'}
-        emissive={active ? '#f59e0b' : '#000000'} emissiveIntensity={active ? 0.7 : 0}
+      <meshStandardMaterial ref={matRef}
+        color={active || animActive ? '#f59e0b' : '#888888'}
+        emissive={active || animActive ? '#fbbf24' : '#000000'}
+        emissiveIntensity={0}
         metalness={0.3} roughness={0.5} />
     </mesh>
   );
@@ -108,7 +133,7 @@ const ElectricParticles = ({ start, end, active, speed = 0.45 }: {
   start: [number, number, number]; end: [number, number, number]; active: boolean; speed?: number;
 }) => {
   const ref = useRef<THREE.Points>(null!);
-  const COUNT = 35;
+  const COUNT = 40;
   const posRef = useRef(new Float32Array(COUNT * 3));
   const tRef = useRef<number[]>([]);
   useEffect(() => { tRef.current = Array.from({ length: COUNT }, () => Math.random()); }, []);
@@ -129,7 +154,7 @@ const ElectricParticles = ({ start, end, active, speed = 0.45 }: {
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[posRef.current, 3]} />
       </bufferGeometry>
-      <pointsMaterial color="#fbbf24" size={0.35} transparent opacity={active ? 1 : 0} />
+      <pointsMaterial color="#fbbf24" size={0.4} transparent opacity={active ? 1 : 0} />
     </points>
   );
 };
@@ -175,7 +200,6 @@ const PulsingRing = ({ position, color = '#fbbf24' }: { position: [number,number
   );
 };
 
-/** Glowing halo on a node to indicate it's a valid wire source */
 const SourceHalo = ({ position }: { position: [number,number,number] }) => {
   const ref = useRef<THREE.Mesh>(null!);
   useFrame(({ clock }) => {
@@ -279,14 +303,39 @@ const DraggableWire = ({ start, end }: { start: [number,number,number]; end: [nu
   );
 };
 
+// Animated voltage bolt that travels along a wire during animation
+const BoltTracer = ({ start, end, active, phase }: {
+  start: [number, number, number]; end: [number, number, number]; active: boolean; phase: number;
+}) => {
+  const ref = useRef<THREE.Mesh>(null!);
+  const tRef = useRef(0);
+  useFrame((_, dt) => {
+    if (!ref.current || !active) return;
+    tRef.current = (tRef.current + dt * 0.8) % 1;
+    const t = tRef.current;
+    const mid = [(start[0]+end[0])/2, Math.min(start[1],end[1])-1.5, (start[2]+end[2])/2];
+    ref.current.position.x = (1-t)*(1-t)*start[0] + 2*(1-t)*t*mid[0] + t*t*end[0];
+    ref.current.position.y = (1-t)*(1-t)*start[1] + 2*(1-t)*t*mid[1] + t*t*end[1];
+    ref.current.position.z = (1-t)*(1-t)*start[2] + 2*(1-t)*t*mid[2] + t*t*end[2];
+    (ref.current.material as THREE.MeshStandardMaterial).emissiveIntensity = 2 + Math.sin(Date.now() * 0.02) * 0.5;
+  });
+  if (!active) return null;
+  return (
+    <mesh ref={ref} position={start}>
+      <sphereGeometry args={[0.35, 12, 12]} />
+      <meshStandardMaterial color="#ffffff" emissive="#fbbf24" emissiveIntensity={2.5} transparent opacity={0.95} />
+    </mesh>
+  );
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TOWER
 // ─────────────────────────────────────────────────────────────────────────────
 
-const Tower = ({ position, active, isWireSource, isWireTarget, isDragging, placed, onWireDragStart }: {
+const Tower = ({ position, active, isWireSource, isWireTarget, isDragging, placed, onWireDragStart, animGlow }: {
   position: [number,number,number]; active: boolean;
   isWireSource: boolean; isWireTarget: boolean; isDragging: boolean;
-  placed: boolean; onWireDragStart: () => void;
+  placed: boolean; onWireDragStart: () => void; animGlow?: boolean;
 }) => {
   const groupRef = useRef<THREE.Group>(null!);
   const scaleRef = useRef(0);
@@ -305,38 +354,34 @@ const Tower = ({ position, active, isWireSource, isWireTarget, isDragging, place
 
   return (
     <group ref={groupRef} position={position}
-      onPointerDown={(e) => {
-        if (isWireSource) { e.stopPropagation(); onWireDragStart(); }
-      }}
-      onPointerOver={() => {
-        setHovered(true);
-        document.body.style.cursor = isWireSource ? 'crosshair' : 'default';
-      }}
+      onPointerDown={(e) => { if (isWireSource) { e.stopPropagation(); onWireDragStart(); } }}
+      onPointerOver={() => { setHovered(true); document.body.style.cursor = isWireSource ? 'crosshair' : 'default'; }}
       onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
     >
       {isWireSource && <PulsingRing position={[0,0,0]} color="#22d3ee" />}
       {isWireTarget && <PulsingRing position={[0,0,0]} color="#4ade80" />}
+      {animGlow && <PulsingRing position={[0,0,0]} color="#fbbf24" />}
 
       <mesh position={[0,5,0]} castShadow>
         <boxGeometry args={[0.5,10,0.5]} />
-        <meshStandardMaterial color={active ? '#888888' : highlight ? '#a3b4c8' : '#777777'}
-          emissive={isWireTarget ? '#4ade80' : isWireSource && hovered ? '#22d3ee' : '#000000'}
-          emissiveIntensity={highlight ? 0.4 : 0} metalness={0.6} roughness={0.4} />
+        <meshStandardMaterial color={active || animGlow ? '#888888' : highlight ? '#a3b4c8' : '#777777'}
+          emissive={animGlow ? '#f59e0b' : isWireTarget ? '#4ade80' : isWireSource && hovered ? '#22d3ee' : '#000000'}
+          emissiveIntensity={animGlow ? 0.5 : highlight ? 0.4 : 0} metalness={0.6} roughness={0.4} />
       </mesh>
       {[7, 8.5].map((y, i) => (
         <mesh key={i} position={[0,y,0]} castShadow>
           <boxGeometry args={[5-i*1.5,0.2,0.2]} />
-          <meshStandardMaterial color={active ? '#999999' : highlight ? '#a3b4c8' : '#777777'}
-            emissive={highlight ? '#22d3ee' : '#000'} emissiveIntensity={highlight ? 0.25 : 0} metalness={0.5} />
+          <meshStandardMaterial color={active || animGlow ? '#999999' : highlight ? '#a3b4c8' : '#777777'}
+            emissive={animGlow ? '#fbbf24' : highlight ? '#22d3ee' : '#000'} emissiveIntensity={animGlow ? 0.3 : highlight ? 0.25 : 0} metalness={0.5} />
         </mesh>
       ))}
       {[-2,2,-1,1].map((x, i) => (
         <mesh key={i} position={[x, i<2?7:8.5, 0]}>
           <cylinderGeometry args={[0.18,0.18,0.5,12]} />
           <meshStandardMaterial
-            color={active ? '#f59e0b' : highlight ? '#86efac' : '#aaaaaa'}
-            emissive={active ? '#f59e0b' : highlight ? '#4ade80' : '#000000'}
-            emissiveIntensity={active ? 0.6 : highlight ? 0.5 : 0} />
+            color={active || animGlow ? '#f59e0b' : highlight ? '#86efac' : '#aaaaaa'}
+            emissive={active || animGlow ? '#f59e0b' : highlight ? '#4ade80' : '#000000'}
+            emissiveIntensity={active || animGlow ? 0.8 : highlight ? 0.5 : 0} />
         </mesh>
       ))}
       {isWireTarget && (
@@ -353,8 +398,8 @@ const Tower = ({ position, active, isWireSource, isWireTarget, isDragging, place
 // TRANSFORMER
 // ─────────────────────────────────────────────────────────────────────────────
 
-const Transformer = ({ energized, placed, isWireSource, onWireDragStart }: {
-  energized: boolean; placed: boolean; isWireSource: boolean; onWireDragStart: () => void;
+const Transformer = ({ energized, placed, isWireSource, onWireDragStart, animGlow }: {
+  energized: boolean; placed: boolean; isWireSource: boolean; onWireDragStart: () => void; animGlow?: boolean;
 }) => {
   const ref = useRef<THREE.Mesh>(null!);
   const groupRef = useRef<THREE.Group>(null!);
@@ -364,7 +409,8 @@ const Transformer = ({ energized, placed, isWireSource, onWireDragStart }: {
   useFrame(({ clock }, dt) => {
     if (!ref.current) return;
     (ref.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
-      energized ? 0.25 + Math.sin(clock.getElapsedTime()*4)*0.15 : 0;
+      animGlow ? 0.4 + Math.sin(clock.getElapsedTime()*6)*0.3
+      : energized ? 0.25 + Math.sin(clock.getElapsedTime()*4)*0.15 : 0;
     if (placed && groupRef.current && scaleRef.current < 1) {
       scaleRef.current = Math.min(1, scaleRef.current + dt*4);
       groupRef.current.scale.setScalar(scaleRef.current);
@@ -379,17 +425,18 @@ const Transformer = ({ energized, placed, isWireSource, onWireDragStart }: {
       onPointerOut={() => { setHovered(false); document.body.style.cursor = 'default'; }}
     >
       {isWireSource && <PulsingRing position={[0,0,0]} color="#22d3ee" />}
+      {animGlow && <PulsingRing position={[0,0,0]} color="#fbbf24" />}
       <mesh ref={ref} position={[0,2,0]} castShadow>
         <boxGeometry args={[3.5,4,3.5]} />
         <meshStandardMaterial color="#6b7280"
-          emissive={isWireSource && hovered ? '#22d3ee' : '#f59e0b'}
+          emissive={animGlow ? '#f59e0b' : isWireSource && hovered ? '#22d3ee' : '#f59e0b'}
           emissiveIntensity={0} metalness={0.6} roughness={0.3} />
       </mesh>
       {[-0.8,0,0.8].map((x,i) => (
         <mesh key={i} position={[x,4.3,0]}>
           <cylinderGeometry args={[0.18,0.18,0.9,12]} />
-          <meshStandardMaterial color={energized ? '#f59e0b' : '#aa5555'}
-            emissive={energized ? '#f59e0b' : '#000'} emissiveIntensity={energized ? 0.8 : 0} />
+          <meshStandardMaterial color={energized || animGlow ? '#f59e0b' : '#aa5555'}
+            emissive={energized || animGlow ? '#f59e0b' : '#000'} emissiveIntensity={energized || animGlow ? 0.8 : 0} />
         </mesh>
       ))}
       <mesh position={[0,-0.05,0]} rotation={[-Math.PI/2,0,0]}>
@@ -404,7 +451,7 @@ const Transformer = ({ energized, placed, isWireSource, onWireDragStart }: {
 // SUBSTATION
 // ─────────────────────────────────────────────────────────────────────────────
 
-const Substation3D = ({ active, placed }: { active: boolean; placed: boolean }) => {
+const Substation3D = ({ active, placed, animGlow }: { active: boolean; placed: boolean; animGlow?: boolean }) => {
   const groupRef = useRef<THREE.Group>(null!);
   const scaleRef = useRef(0);
   useFrame((_, dt) => {
@@ -416,11 +463,12 @@ const Substation3D = ({ active, placed }: { active: boolean; placed: boolean }) 
   if (!placed) return null;
   return (
     <group ref={groupRef} position={[14,0,0]}>
+      {animGlow && <PulsingRing position={[0,0,0]} color="#818cf8" />}
       {[0,2,-2].map((x,i) => (
         <mesh key={i} position={[x,2+i,0]} castShadow>
           <boxGeometry args={[1.5,4+i*2,1.5]} />
-          <meshStandardMaterial color={active ? '#fbbf24' : '#9ca3af'}
-            emissive={active ? '#fbbf24' : '#000'} emissiveIntensity={active ? 0.4 : 0} />
+          <meshStandardMaterial color={active || animGlow ? '#fbbf24' : '#9ca3af'}
+            emissive={animGlow ? '#818cf8' : active ? '#fbbf24' : '#000'} emissiveIntensity={animGlow ? 0.6 : active ? 0.4 : 0} />
         </mesh>
       ))}
     </group>
@@ -462,7 +510,7 @@ const DropZone = ({ position, label, isHighlighted, placed }: {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DRAG PLANE (wire dragging — invisible plane at y=8)
+// DRAG PLANE
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DragPlane = ({ active, onMove, onRelease }: {
@@ -485,42 +533,39 @@ const DragPlane = ({ active, onMove, onRelease }: {
 
 interface SceneProps {
   connections: string[];
-  showExplanation: boolean;
   orbitRef: React.MutableRefObject<any>;
   placedItems: Set<string>;
   buildComplete: boolean;
   wireToolActive: boolean;
   draggingToolId: string | null;
+  animPhase: number; // -1 = not animating
   onSuccessfulConnection: (connectionIndex: number) => void;
   onFailedConnection: () => void;
 }
 
 const SceneContent = ({
-  connections, showExplanation, orbitRef,
+  connections, orbitRef,
   placedItems, buildComplete, wireToolActive, draggingToolId,
+  animPhase,
   onSuccessfulConnection, onFailedConnection,
 }: SceneProps) => {
   const step = connections.length;
+  const isAnimating = animPhase >= 0;
 
-  // ── Wire drag state ──
   const [wireDragging, setWireDragging] = useState(false);
   const [wireStartNode, setWireStartNode] = useState<string | null>(null);
   const [wireStartPos, setWireStartPos] = useState<[number,number,number]>([0,8.5,0]);
   const [wireDragPos, setWireDragPos] = useState<[number,number,number]>([0,8.5,0]);
   const [hoverTarget, setHoverTarget] = useState<string | null>(null);
-
-  // ── Effect containers ──
   const [sparks, setSparks] = useState<{id: number; pos: [number,number,number]}[]>([]);
   const [ripples, setRipples] = useState<{id: number; pos: [number,number,number]}[]>([]);
-  const [flashLines, setFlashLines] = useState<Set<number>>(new Set());
   const [errorPos, setErrorPos] = useState<[number,number,number] | null>(null);
 
-  // Derived: which node is valid source / target for next connection
   const validSource = step < 3 ? CONNECTION_FLOW[step].split('-')[0] : null;
   const validTarget = step < 3 ? CONNECTION_FLOW[step].split('-')[1] : null;
 
   const startWireDrag = useCallback((nodeId: string) => {
-    if (showExplanation || step >= 3 || !wireToolActive) return;
+    if (isAnimating || step >= 3 || !wireToolActive) return;
     if (nodeId !== validSource) return;
     setWireStartNode(nodeId);
     const pos = NODE_ATTACH[nodeId];
@@ -529,13 +574,11 @@ const SceneContent = ({
     setWireDragging(true);
     if (orbitRef.current) orbitRef.current.enabled = false;
     document.body.style.cursor = 'crosshair';
-  }, [showExplanation, step, wireToolActive, validSource, orbitRef]);
+  }, [isAnimating, step, wireToolActive, validSource, orbitRef]);
 
   const handlePointerMove = useCallback((pt: THREE.Vector3) => {
     setWireDragPos([pt.x, pt.y, pt.z]);
-    // Proximity detection to all nodes
-    let closest: string | null = null;
-    let minDist = 4.5;
+    let closest: string | null = null; let minDist = 4.5;
     Object.entries(NODE_ATTACH).forEach(([nid, npos]) => {
       if (nid === wireStartNode) return;
       const d = Math.sqrt((pt.x-npos[0])**2 + (pt.z-npos[2])**2);
@@ -549,26 +592,20 @@ const SceneContent = ({
     setWireDragging(false);
     if (orbitRef.current) orbitRef.current.enabled = true;
     document.body.style.cursor = 'default';
-
     if (hoverTarget) {
       const key = `${wireStartNode}-${hoverTarget}`;
       const expected = CONNECTION_FLOW[step];
       if (key === expected) {
-        // ✅ Valid connection
         const targetPos = NODE_ATTACH[hoverTarget];
         setSparks(prev => [...prev, { id: Date.now(), pos: targetPos }]);
         setRipples(prev => [...prev, { id: Date.now(), pos: [targetPos[0],0,targetPos[2]] }]);
-        setFlashLines(prev => new Set([...prev, step]));
-        setTimeout(() => setFlashLines(prev => { const s = new Set(prev); s.delete(step); return s; }), 900);
         onSuccessfulConnection(step);
       } else {
-        // ❌ Invalid connection
         setErrorPos([wireDragPos[0], 0, wireDragPos[2]]);
         setTimeout(() => setErrorPos(null), 700);
         onFailedConnection();
       }
     } else {
-      // Dropped in empty space
       setErrorPos([wireDragPos[0], 0, wireDragPos[2]]);
       setTimeout(() => setErrorPos(null), 500);
     }
@@ -576,23 +613,15 @@ const SceneContent = ({
     setWireStartNode(null);
   }, [wireDragging, hoverTarget, wireStartNode, step, wireDragPos, orbitRef, onSuccessfulConnection, onFailedConnection]);
 
-  // Global pointer-up safety net: if the user releases the mouse anywhere
-  // outside the Three.js canvas the DragPlane never receives the event,
-  // leaving the scene frozen. This listener catches that case.
-  // Also guard against Escape key to cancel a stuck drag.
   useEffect(() => {
     if (!wireDragging) return;
     const onGlobalPointerUp = () => handleRelease();
     const onEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') handleRelease(); };
     window.addEventListener('pointerup', onGlobalPointerUp);
     window.addEventListener('keydown', onEscape);
-    return () => {
-      window.removeEventListener('pointerup', onGlobalPointerUp);
-      window.removeEventListener('keydown', onEscape);
-    };
+    return () => { window.removeEventListener('pointerup', onGlobalPointerUp); window.removeEventListener('keydown', onEscape); };
   }, [wireDragging, handleRelease]);
 
-  // Cleanup old effects
   useEffect(() => {
     if (!sparks.length) return;
     const t = setTimeout(() => setSparks(prev => prev.filter(s => Date.now()-s.id < 1500)), 1600);
@@ -612,58 +641,62 @@ const SceneContent = ({
     { id:'substation', pos:[14,0,0] as [number,number,number], label:'Substation' },
   ];
 
+  // During animation, compute what's active based on animPhase
+  const animLine0 = isAnimating && animPhase >= 1;
+  const animLine1 = isAnimating && animPhase >= 2;
+  const animLine2 = isAnimating && animPhase >= 3;
+  const animTransformerGlow = isAnimating && animPhase >= 0;
+  const animTower1Glow = isAnimating && animPhase >= 1;
+  const animTower2Glow = isAnimating && animPhase >= 2;
+  const animTower3Glow = isAnimating && animPhase >= 3;
+  const animSubstationGlow = isAnimating && animPhase >= 4;
+
   return (
     <>
       <DragPlane active={wireDragging} onMove={handlePointerMove} onRelease={handleRelease} />
 
-      {/* Ground */}
       <mesh position={[0,-0.1,0]} rotation={[-Math.PI/2,0,0]} receiveShadow>
         <planeGeometry args={[60,40]} />
         <meshStandardMaterial color="#86efac" roughness={0.9} />
       </mesh>
 
-      {/* Drop zones (build phase only) */}
       {!buildComplete && dropZones.map(z => (
         <DropZone key={z.id} position={z.pos} label={z.label}
           isHighlighted={draggingToolId === z.id} placed={placedItems.has(z.id)} />
       ))}
 
-      {/* Transformer */}
       <Transformer energized={step >= 1} placed={placedItems.has('transformer')}
-        isWireSource={wireToolActive && validSource === 'transformer' && !wireDragging && !showExplanation}
-        onWireDragStart={() => startWireDrag('transformer')} />
+        isWireSource={!isAnimating && wireToolActive && validSource === 'transformer' && !wireDragging}
+        onWireDragStart={() => startWireDrag('transformer')}
+        animGlow={animTransformerGlow} />
       {placedItems.has('transformer') && (
-        <Label3D position={[-15,6.5,0]} text="Step-Up Transformer (132 kV)" active={step >= 1} yOffset={2.5} />
+        <Label3D position={[-15,6.5,0]} text={animPhase >= 0 ? 'Step-Up Transformer ⚡ 132 kV' : 'Step-Up Transformer (132 kV)'} active={step >= 1 || animPhase >= 0} yOffset={2.5} />
       )}
-      {/* Source halo on transformer when it's the valid start */}
-      {wireToolActive && validSource === 'transformer' && !wireDragging && placedItems.has('transformer') && !showExplanation && (
+      {!isAnimating && wireToolActive && validSource === 'transformer' && !wireDragging && placedItems.has('transformer') && (
         <SourceHalo position={NODE_ATTACH['transformer']} />
       )}
 
-      {/* Towers */}
       {TOWER_POSITIONS.map((pos, i) => {
         const tId = `tower${i+1}`;
-        const isWireSrc = wireToolActive && validSource === tId && !wireDragging && !showExplanation;
+        const isWireSrc = !isAnimating && wireToolActive && validSource === tId && !wireDragging;
         const isWireTgt = wireDragging && hoverTarget === tId;
+        const towerAnimGlows = [animTower1Glow, animTower2Glow, animTower3Glow];
         return (
           <React.Fragment key={i}>
             <Tower position={pos} active={step > i}
               isWireSource={isWireSrc} isWireTarget={isWireTgt}
               isDragging={wireDragging} placed={placedItems.has(tId)}
-              onWireDragStart={() => startWireDrag(tId)} />
+              onWireDragStart={() => startWireDrag(tId)}
+              animGlow={towerAnimGlows[i]} />
             {placedItems.has(tId) && (
-              <Label3D position={[pos[0],11.5,pos[2]]} text={`Transmission Tower ${i+1}`} active={step > i} yOffset={1.5} />
+              <Label3D position={[pos[0],11.5,pos[2]]} text={`Transmission Tower ${i+1}`} active={step > i || towerAnimGlows[i]} yOffset={1.5} />
             )}
-            {/* Source halo on tower */}
-            {isWireSrc && placedItems.has(tId) && (
-              <SourceHalo position={NODE_ATTACH[tId]} />
-            )}
+            {isWireSrc && placedItems.has(tId) && <SourceHalo position={NODE_ATTACH[tId]} />}
           </React.Fragment>
         );
       })}
 
-      {/* Target highlight halo on hovered node */}
-      {wireDragging && hoverTarget && hoverTarget !== wireStartNode && validTarget === hoverTarget && (
+      {wireDragging && hoverTarget && validTarget === hoverTarget && (
         <Html position={[NODE_ATTACH[hoverTarget][0], NODE_ATTACH[hoverTarget][1]+1.5, NODE_ATTACH[hoverTarget][2]]} center>
           <div style={{
             pointerEvents:'none', background:'rgba(15,23,42,0.92)', color:'#4ade80',
@@ -673,10 +706,8 @@ const SceneContent = ({
         </Html>
       )}
 
-      {/* Wire drag preview */}
       {wireDragging && <DraggableWire start={wireStartPos} end={wireDragPos} />}
 
-      {/* Drag tooltip */}
       {wireDragging && hoverTarget !== validTarget && (
         <Html position={[wireDragPos[0], wireDragPos[1]+1.5, wireDragPos[2]]} center>
           <div style={{
@@ -689,32 +720,40 @@ const SceneContent = ({
         </Html>
       )}
 
-      {/* Active power lines — now includes transformer → tower1 */}
-      {step >= 1 && <PowerLine start={[-15,8.5,0]} end={[-8,8.5,0]} active flash={flashLines.has(0)} />}
-      {step >= 2 && <PowerLine start={[-8,8.5,0]} end={[0,8.5,0]} active flash={flashLines.has(1)} />}
-      {step >= 3 && <PowerLine start={[0,8.5,0]} end={[8,8.5,0]} active flash={flashLines.has(2)} />}
+      {/* Static power lines (built phase) */}
+      {!isAnimating && step >= 1 && <PowerLine start={[-15,8.5,0]} end={[-8,8.5,0]} active />}
+      {!isAnimating && step >= 2 && <PowerLine start={[-8,8.5,0]} end={[0,8.5,0]} active />}
+      {!isAnimating && step >= 3 && <PowerLine start={[0,8.5,0]} end={[8,8.5,0]} active />}
 
-      {/* Electric particles */}
-      {step >= 1 && <ElectricParticles start={[-15,8.5,0]} end={[-8,8.5,0]} active speed={step>=3?0.75:0.45} />}
-      {step >= 2 && <ElectricParticles start={[-8,8.5,0]} end={[0,8.5,0]} active speed={step>=3?0.75:0.45} />}
-      {step >= 3 && <ElectricParticles start={[0,8.5,0]} end={[8,8.5,0]} active speed={step>=3?0.75:0.45} />}
+      {/* Animation power lines */}
+      {isAnimating && <PowerLine start={[-15,8.5,0]} end={[-8,8.5,0]} active animActive={animLine0} speed={1.5} />}
+      {isAnimating && <PowerLine start={[-8,8.5,0]} end={[0,8.5,0]} active={step>=2} animActive={animLine1} speed={1.5} />}
+      {isAnimating && <PowerLine start={[0,8.5,0]} end={[8,8.5,0]} active={step>=3} animActive={animLine2} speed={1.5} />}
 
-      {/* Effects */}
+      {/* Animation bolt tracers */}
+      {isAnimating && <BoltTracer start={[-15,8.5,0]} end={[-8,8.5,0]} active={animLine0} phase={animPhase} />}
+      {isAnimating && <BoltTracer start={[-8,8.5,0]} end={[0,8.5,0]} active={animLine1} phase={animPhase} />}
+      {isAnimating && <BoltTracer start={[0,8.5,0]} end={[8,8.5,0]} active={animLine2} phase={animPhase} />}
+
+      {/* Particles */}
+      {step >= 1 && <ElectricParticles start={[-15,8.5,0]} end={[-8,8.5,0]} active speed={isAnimating ? 1.2 : 0.45} />}
+      {step >= 2 && <ElectricParticles start={[-8,8.5,0]} end={[0,8.5,0]} active speed={isAnimating ? 1.2 : 0.45} />}
+      {step >= 3 && <ElectricParticles start={[0,8.5,0]} end={[8,8.5,0]} active speed={isAnimating ? 1.2 : 0.45} />}
+
       {sparks.map(s => <SparkBurst key={s.id} position={s.pos} />)}
       {ripples.map(r => <GroundRipple key={r.id} position={r.pos} />)}
       {errorPos && <ErrorRing position={errorPos} />}
 
-      {/* Substation */}
-      <Substation3D active={step >= 3} placed={placedItems.has('substation')} />
+      <Substation3D active={step >= 3} placed={placedItems.has('substation')} animGlow={animSubstationGlow} />
       {placedItems.has('substation') && (
-        <Label3D position={[14,7,0]} text="Substation (Step-Down)" active={step>=3} yOffset={2.5} />
+        <Label3D position={[14,7,0]} text={animSubstationGlow ? 'Substation ⚡ Receiving Power!' : 'Substation (Step-Down)'} active={step>=3 || animSubstationGlow} yOffset={2.5} />
       )}
     </>
   );
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TOOLKIT PANEL (HTML)
+// TOOLKIT PANEL
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ToolkitItem = ({ item, placed, active, locked, onDragStart, onDragEnd, isDraggingThis }: {
@@ -753,47 +792,51 @@ const ToolkitItem = ({ item, placed, active, locked, onDragStart, onDragEnd, isD
 };
 
 const ToolkitPanel = ({ placedItems, buildComplete, wireToolActive, onToggleWireTool,
-  draggingToolId, onItemDragStart, onItemDragEnd, hint }: {
+  draggingToolId, onItemDragStart, onItemDragEnd, hint, hidden }: {
   placedItems: Set<string>; buildComplete: boolean; wireToolActive: boolean;
   onToggleWireTool: () => void; draggingToolId: string | null;
   onItemDragStart: (id: string) => void; onItemDragEnd: (id: string) => void; hint: string;
-}) => (
-  <div style={{
-    position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)',
-    zIndex:20, width:'168px', display:'flex', flexDirection:'column', gap:'8px', pointerEvents:'auto',
-  }}>
+  hidden?: boolean;
+}) => {
+  if (hidden) return null;
+  return (
     <div style={{
-      background:'rgba(15,23,42,0.88)', backdropFilter:'blur(16px)', borderRadius:'16px', padding:'12px',
-      border:'1.5px solid rgba(99,102,241,0.4)',
-      boxShadow:'0 8px 32px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.06)',
+      position:'absolute', left:'12px', top:'50%', transform:'translateY(-50%)',
+      zIndex:20, width:'168px', display:'flex', flexDirection:'column', gap:'8px', pointerEvents:'auto',
     }}>
-      <div style={{fontSize:'10px',fontWeight:800,letterSpacing:'0.1em',color:'#818cf8',marginBottom:'10px',textAlign:'center'}}>
-        🔧 TOOLKIT
+      <div style={{
+        background:'rgba(15,23,42,0.88)', backdropFilter:'blur(16px)', borderRadius:'16px', padding:'12px',
+        border:'1.5px solid rgba(99,102,241,0.4)',
+        boxShadow:'0 8px 32px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.06)',
+      }}>
+        <div style={{fontSize:'10px',fontWeight:800,letterSpacing:'0.1em',color:'#818cf8',marginBottom:'10px',textAlign:'center'}}>
+          🔧 TOOLKIT
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+          {TOOLKIT_ITEMS.map(item => {
+            const isWire = item.id === 'wire';
+            const placed = placedItems.has(item.id);
+            const active = isWire && wireToolActive;
+            const locked = isWire && !buildComplete;
+            return (
+              <ToolkitItem key={item.id} item={item} placed={placed&&!isWire} active={active} locked={locked}
+                isDraggingThis={draggingToolId === item.id}
+                onDragStart={() => { if (isWire) { if (buildComplete) onToggleWireTool(); return; } if (!placed) onItemDragStart(item.id); }}
+                onDragEnd={() => { if (!isWire && !placed) onItemDragEnd(item.id); }} />
+            );
+          })}
+        </div>
       </div>
-      <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-        {TOOLKIT_ITEMS.map(item => {
-          const isWire = item.id === 'wire';
-          const placed = placedItems.has(item.id);
-          const active = isWire && wireToolActive;
-          const locked = isWire && !buildComplete;
-          return (
-            <ToolkitItem key={item.id} item={item} placed={placed&&!isWire} active={active} locked={locked}
-              isDraggingThis={draggingToolId === item.id}
-              onDragStart={() => { if (isWire) { if (buildComplete) onToggleWireTool(); return; } if (!placed) onItemDragStart(item.id); }}
-              onDragEnd={() => { if (!isWire && !placed) onItemDragEnd(item.id); }} />
-          );
-        })}
-      </div>
+      <motion.div key={hint} initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} style={{
+        background:'rgba(15,23,42,0.88)', backdropFilter:'blur(12px)', borderRadius:'12px', padding:'10px 11px',
+        border:'1.5px solid rgba(99,102,241,0.3)', boxShadow:'0 4px 16px rgba(0,0,0,0.3)',
+      }}>
+        <div style={{fontSize:'9px',fontWeight:700,color:'#818cf8',marginBottom:'5px',letterSpacing:'0.08em'}}>💡 NEXT STEP</div>
+        <div style={{fontSize:'10.5px',color:'#cbd5e1',lineHeight:1.5,fontWeight:500}}>{hint}</div>
+      </motion.div>
     </div>
-    <motion.div key={hint} initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} style={{
-      background:'rgba(15,23,42,0.88)', backdropFilter:'blur(12px)', borderRadius:'12px', padding:'10px 11px',
-      border:'1.5px solid rgba(99,102,241,0.3)', boxShadow:'0 4px 16px rgba(0,0,0,0.3)',
-    }}>
-      <div style={{fontSize:'9px',fontWeight:700,color:'#818cf8',marginBottom:'5px',letterSpacing:'0.08em'}}>💡 NEXT STEP</div>
-      <div style={{fontSize:'10.5px',color:'#cbd5e1',lineHeight:1.5,fontWeight:500}}>{hint}</div>
-    </motion.div>
-  </div>
-);
+  );
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DRAG GHOST
@@ -814,28 +857,276 @@ const DragGhost = ({ item, pos }: { item: typeof TOOLKIT_ITEMS[0]|null; pos:{x:n
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CONNECTION TOAST (brief feedback after each wire)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ConnectionToast = ({ message, visible }: { message: string; visible: boolean }) => (
+  <AnimatePresence>
+    {visible && (
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.9 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -20, scale: 0.9 }}
+        style={{
+          position: 'absolute', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
+          zIndex: 50, pointerEvents: 'none',
+          background: 'linear-gradient(135deg,rgba(34,197,94,0.95),rgba(16,185,129,0.95))',
+          color: '#fff', padding: '10px 24px', borderRadius: '50px',
+          fontWeight: 700, fontSize: '0.95rem', fontFamily: 'system-ui, sans-serif',
+          boxShadow: '0 4px 20px rgba(34,197,94,0.4)',
+          border: '1.5px solid rgba(255,255,255,0.3)',
+        }}
+      >
+        {message}
+      </motion.div>
+    )}
+  </AnimatePresence>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ANIMATION OVERLAY
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AnimationOverlay = ({ phase, progress }: { phase: number; progress: number }) => {
+  if (phase < 0) return null;
+  const phaseData = ANIM_PHASES[Math.min(phase, ANIM_PHASES.length - 1)];
+  const totalProgress = Math.round((progress / 12) * 100);
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 30,
+      pointerEvents: 'none', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'flex-start', paddingTop: '16px',
+    }}>
+      {/* Top progress bar */}
+      <div style={{
+        width: '60%', maxWidth: '500px',
+        background: 'rgba(15,23,42,0.85)', borderRadius: '50px', padding: '4px 16px 8px',
+        backdropFilter: 'blur(12px)', border: '1.5px solid rgba(251,191,36,0.4)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+          <span style={{ color: '#fbbf24', fontWeight: 700, fontSize: '0.7rem', letterSpacing: '0.08em' }}>
+            ⚡ ELECTRICITY FLOW ANIMATION
+          </span>
+          <span style={{ color: '#94a3b8', fontSize: '0.7rem', fontWeight: 600 }}>{totalProgress}%</span>
+        </div>
+        <div style={{ background: 'rgba(30,41,59,0.8)', borderRadius: '8px', height: '6px', overflow: 'hidden' }}>
+          <motion.div
+            style={{
+              height: '100%', borderRadius: '8px',
+              background: 'linear-gradient(90deg,#f59e0b,#fbbf24,#22d3ee)',
+            }}
+            animate={{ width: `${totalProgress}%` }}
+            transition={{ duration: 0.5 }}
+          />
+        </div>
+      </div>
+
+      {/* Phase card */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={phase}
+          initial={{ opacity: 0, y: 20, scale: 0.92 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -20, scale: 0.92 }}
+          transition={{ duration: 0.45 }}
+          style={{
+            marginTop: '12px', width: 'min(520px, 90%)',
+            background: 'rgba(15,23,42,0.92)', backdropFilter: 'blur(16px)',
+            borderRadius: '20px', padding: '18px 24px',
+            border: `2px solid ${phaseData.color}66`,
+            boxShadow: `0 8px 32px rgba(0,0,0,0.35), 0 0 20px ${phaseData.color}22`,
+          }}
+        >
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px',
+          }}>
+            <div style={{
+              background: `${phaseData.color}22`, border: `2px solid ${phaseData.color}`,
+              borderRadius: '12px', padding: '8px 14px',
+              color: phaseData.color, fontWeight: 800, fontSize: '1.05rem',
+            }}>
+              {phaseData.title}
+            </div>
+          </div>
+          <div style={{
+            display: 'inline-block', background: `${phaseData.color}15`,
+            color: phaseData.color, fontWeight: 700, fontSize: '0.78rem',
+            padding: '3px 10px', borderRadius: '20px', marginBottom: '8px',
+            border: `1px solid ${phaseData.color}44`,
+          }}>
+            {phaseData.subtitle}
+          </div>
+          <p style={{ color: '#cbd5e1', fontSize: '0.88rem', lineHeight: 1.6, margin: '0 0 10px' }}>
+            {phaseData.desc}
+          </p>
+          <div style={{
+            background: 'rgba(30,41,59,0.7)', borderRadius: '10px', padding: '8px 14px',
+            display: 'flex', alignItems: 'center', gap: '8px',
+          }}>
+            <span style={{ color: '#fbbf24', fontSize: '0.75rem', fontWeight: 700 }}>📐 Formula:</span>
+            <span style={{ color: '#f1f5f9', fontFamily: 'monospace', fontSize: '0.9rem', fontWeight: 600 }}>
+              {phaseData.formula}
+            </span>
+          </div>
+        </motion.div>
+      </AnimatePresence>
+
+      {/* Flow diagram at bottom */}
+      <div style={{
+        position: 'absolute', bottom: '72px', left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', alignItems: 'center', gap: '6px',
+        background: 'rgba(15,23,42,0.85)', borderRadius: '50px', padding: '8px 18px',
+        border: '1.5px solid rgba(99,102,241,0.4)', backdropFilter: 'blur(10px)',
+      }}>
+        {[
+          { label: 'Dam', icon: '💧', active: true },
+          { label: '→', icon: '', active: true },
+          { label: 'Transformer', icon: '⚡', active: phase >= 0 },
+          { label: '→', icon: '', active: phase >= 0 },
+          { label: 'Tower 1', icon: '🗼', active: phase >= 1 },
+          { label: '→', icon: '', active: phase >= 1 },
+          { label: 'Tower 2', icon: '🗼', active: phase >= 2 },
+          { label: '→', icon: '', active: phase >= 2 },
+          { label: 'Tower 3', icon: '🗼', active: phase >= 3 },
+          { label: '→', icon: '', active: phase >= 3 },
+          { label: 'Substation', icon: '🏭', active: phase >= 4 },
+        ].map((item, i) => (
+          <span key={i} style={{
+            fontSize: item.icon ? '0.72rem' : '0.65rem',
+            color: item.active ? (item.icon ? '#fbbf24' : '#f59e0b') : '#475569',
+            fontWeight: item.active ? 700 : 400,
+            transition: 'color 0.4s',
+            whiteSpace: 'nowrap',
+          }}>
+            {item.icon ? `${item.icon} ` : ''}{item.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUMMARY CARD
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SummaryCard = ({ onNextLevel }: { onNextLevel: () => void }) => {
+  return (
+  <motion.div
+    initial={{ opacity: 0, scale: 0.85 }}
+    animate={{ opacity: 1, scale: 1 }}
+    className="absolute inset-0 z-50 flex items-center justify-center"
+    style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', pointerEvents: 'auto' }}
+  >
+    <motion.div
+      initial={{ y: 40 }}
+      animate={{ y: 0 }}
+      transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
+      style={{
+        background: 'rgba(15,23,42,0.97)', borderRadius: '28px', padding: '36px 40px',
+        maxWidth: '520px', width: '90%', border: '2.5px solid #fbbf24',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(251,191,36,0.2)',
+      }}
+    >
+      <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+        <div style={{ fontSize: '3rem', marginBottom: '8px' }}>⚡</div>
+        <h2 style={{ color: '#fbbf24', fontWeight: 800, fontSize: '1.6rem', margin: '0 0 4px' }}>
+          Level 3 Complete!
+        </h2>
+        <p style={{ color: '#94a3b8', fontSize: '0.9rem', margin: 0 }}>
+          Electricity Transmission Mastered
+        </p>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '28px' }}>
+        {[
+          { icon: '🔺', title: 'Step-Up Transformer', desc: 'Increases voltage from 11 kV to 132 kV, dramatically reducing current and energy losses over long distances.' },
+          { icon: '📉', title: 'Power Loss Formula', desc: 'P_loss = I²R — By doubling the voltage and halving the current, power loss is reduced by 4 times!' },
+          { icon: '🗼', title: 'Transmission Towers', desc: 'Steel towers 50–100 m tall carry high-voltage power lines across valleys, mountains and rivers for hundreds of km.' },
+          { icon: '🏭', title: 'The Substation', desc: 'Receives high-voltage electricity and steps it back down to safer levels for homes, schools and businesses.' },
+        ].map((item, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2 + i * 0.1 }}
+            style={{
+              display: 'flex', gap: '12px', alignItems: 'flex-start',
+              background: 'rgba(30,41,59,0.7)', borderRadius: '14px', padding: '12px 16px',
+              border: '1px solid rgba(99,102,241,0.25)',
+            }}
+          >
+            <span style={{ fontSize: '1.4rem', flexShrink: 0 }}>{item.icon}</span>
+            <div>
+              <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.9rem', marginBottom: '3px' }}>{item.title}</div>
+              <div style={{ color: '#94a3b8', fontSize: '0.8rem', lineHeight: 1.5 }}>{item.desc}</div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
+      <div style={{
+        background: 'linear-gradient(135deg,rgba(245,158,11,0.15),rgba(251,191,36,0.1))',
+        borderRadius: '14px', padding: '14px 18px', marginBottom: '24px',
+        border: '1.5px solid rgba(245,158,11,0.3)', textAlign: 'center',
+      }}>
+        <p style={{ color: '#fbbf24', fontWeight: 700, fontSize: '0.9rem', margin: 0 }}>
+          🎯 Key Takeaway
+        </p>
+        <p style={{ color: '#e2e8f0', fontSize: '0.85rem', margin: '6px 0 0', lineHeight: 1.5 }}>
+          High voltage transmission is one of the smartest ideas in engineering — it lets a single power plant
+          supply electricity to an entire city with minimal waste!
+        </p>
+      </div>
+
+      <motion.button
+        whileHover={{ scale: 1.04 }}
+        whileTap={{ scale: 0.96 }}
+        onClick={onNextLevel}
+        style={{
+          width: '100%', padding: '16px', borderRadius: '16px', border: 'none', cursor: 'pointer',
+          background: 'linear-gradient(135deg,#f59e0b,#fbbf24)',
+          color: '#1c1917', fontWeight: 800, fontSize: '1.1rem',
+          boxShadow: '0 4px 20px rgba(245,158,11,0.4)',
+        }}
+      >
+        ⚡ Continue to Level 4 →
+      </motion.button>
+    </motion.div>
+  </motion.div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAIN LEVEL COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const Level3Transmission = () => {
-  const { setVoltMessage, setLevelComplete, addScore, addStar } = useGameStore();
+  const { setVoltMessage, setLevelComplete, addScore, addStar, nextLevel } = useGameStore();
 
-  // ── Core game state ──
   const [connections, setConnections] = useState<string[]>([]);
   const [step, setStep] = useState(0);
-  const [showExplanation, setShowExplanation] = useState(false);
-
-  // ── Build phase state ──
   const [placedItems, setPlacedItems] = useState<Set<string>>(new Set());
   const [buildComplete, setBuildComplete] = useState(false);
   const [wireToolActive, setWireToolActive] = useState(false);
-
-  // ── Toolkit drag state ──
   const [draggingToolId, setDraggingToolId] = useState<string|null>(null);
   const [ghostPos, setGhostPos] = useState({x:0,y:0});
 
+  // New states for animation flow
+  const [wiringDone, setWiringDone] = useState(false);
+  const [animPhase, setAnimPhase] = useState(-1);        // -1 = not started
+  const [animProgress, setAnimProgress] = useState(0);  // seconds elapsed
+  const [showSummary, setShowSummary] = useState(false);
+
+  // Toast for wire connections
+  const [toastMsg, setToastMsg] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+
   const orbitRef = useRef<any>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const animTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     setVoltMessage('🔧 Drag components from the toolkit to build the transmission network!');
@@ -848,37 +1139,85 @@ export const Level3Transmission = () => {
     }
   }, [placedItems]);
 
-  // ── Successful connection handler (replaces handleTowerClick) ──
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    setToastVisible(true);
+    setTimeout(() => setToastVisible(false), 2200);
+  }, []);
+
   const handleSuccessfulConnection = useCallback((connectionIndex: number) => {
     const key = CONNECTION_FLOW[connectionIndex];
     const newConnections = [...connections, key];
     setConnections(newConnections);
     const nextStep = newConnections.length;
     setStep(nextStep);
-    setShowExplanation(true);
 
-    if (connectionIndex === 0) setVoltMessage('✅ Transformer → Tower 1! High voltage (132 kV) reduces energy loss. P = I²R — less current = less heat!');
-    if (connectionIndex === 1) setVoltMessage('✅ Tower 1 → Tower 2! Electricity travels at near light speed through these wires!');
+    const toasts = [
+      '✅ Connected! Transformer → Tower 1 (132 kV!)',
+      '✅ Connected! Tower 1 → Tower 2',
+      '✅ Connected! Tower 2 → Tower 3 — Wiring Complete!',
+    ];
+    showToast(toasts[connectionIndex]);
+
+    if (connectionIndex === 0) setVoltMessage('⚡ Transformer → Tower 1 connected! High voltage = lower current = less energy wasted.');
+    if (connectionIndex === 1) setVoltMessage('⚡ Tower 1 → Tower 2 connected! Electricity travels at near the speed of light!');
     if (connectionIndex === 2) {
-      setVoltMessage('⭐ All towers connected! 132,000 Volts of power is now flowing to Spark City!');
-      setLevelComplete(true);
-      addScore(100);
-      addStar();
+      setVoltMessage('🎉 All wiring complete! Now click "Start Electricity Network Connectivity" to see it in action!');
+      setWiringDone(true);
+      setWireToolActive(false);
     }
-  }, [connections, setLevelComplete, addScore, addStar, setVoltMessage]);
+  }, [connections, setVoltMessage, showToast]);
 
   const handleFailedConnection = useCallback(() => {
     setVoltMessage('❌ Wrong connection! Check the flow: Transformer → Tower 1 → Tower 2 → Tower 3');
   }, [setVoltMessage]);
 
-  const handleContinue = () => setShowExplanation(false);
+  // Start the animation
+  const startAnimation = useCallback(() => {
+    setAnimPhase(0);
+    setAnimProgress(0);
+    setVoltMessage('🎬 Watch electricity flow through the entire transmission network!');
 
-  // ── Toolkit drag ──
+    let elapsed = 0;
+    const TOTAL = 12;
+    const TICK = 0.1;
+
+    animTimerRef.current = setInterval(() => {
+      elapsed += TICK;
+      setAnimProgress(elapsed);
+
+      // Phase boundaries: 0-2, 2-4, 4-6, 6-8, 8-10, 10-12
+      const newPhase = Math.min(Math.floor(elapsed / 2), ANIM_PHASES.length - 1);
+      setAnimPhase(newPhase);
+
+      if (elapsed >= TOTAL) {
+        clearInterval(animTimerRef.current!);
+        animTimerRef.current = null;
+        // Finish — award score, then show summary
+        setLevelComplete(true);
+        addScore(100);
+        addStar();
+        setVoltMessage('⭐ Excellent! You mastered electricity transmission! Read the summary to continue.');
+        setTimeout(() => {
+          setAnimPhase(-1);
+          setShowSummary(true);
+        }, 600);
+      }
+    }, TICK * 1000);
+  }, [setLevelComplete, addScore, addStar, setVoltMessage]);
+
+  useEffect(() => () => { if (animTimerRef.current) clearInterval(animTimerRef.current); }, []);
+
+  const handleNextLevel = useCallback(() => {
+    nextLevel();
+  }, [nextLevel]);
+
+  // Toolkit drag
   const handleItemDragStart = useCallback((id: string) => {
     setDraggingToolId(id);
     document.body.style.cursor = 'grabbing';
   }, []);
-  const handleItemDragEnd = useCallback((id: string) => {
+  const handleItemDragEnd = useCallback((_id: string) => {
     setDraggingToolId(null);
     document.body.style.cursor = 'default';
   }, []);
@@ -903,6 +1242,7 @@ export const Level3Transmission = () => {
   }, [draggingToolId]);
 
   const toggleWireTool = () => {
+    if (wiringDone) return;
     setWireToolActive(prev => {
       const next = !prev;
       setVoltMessage(next
@@ -912,7 +1252,6 @@ export const Level3Transmission = () => {
     });
   };
 
-  // ── Hint logic ──
   const hint = useMemo(() => {
     if (!buildComplete) {
       const rem = REQUIRED_ITEMS.filter(id => !placedItems.has(id));
@@ -922,34 +1261,34 @@ export const Level3Transmission = () => {
         return `Still need: ${rem.map(id => labels[id]).join(', ')}`;
       }
     }
+    if (wiringDone) return '🎬 Click the big button to start the electricity animation!';
     if (!wireToolActive) return 'All placed! Click the 〰️ Wire Tool to start connecting!';
     if (step === 0) return 'Click the cyan ◉ on the Transformer and drag to Tower 1!';
     if (step === 1) return 'Click the cyan ◉ on Tower 1 and drag to Tower 2!';
     if (step === 2) return 'Last one! Click Tower 2 ◉ and drag to Tower 3!';
-    return '⚡ Network complete! Electricity is flowing!';
-  }, [buildComplete, placedItems, wireToolActive, step]);
+    return '⚡ Network wired!';
+  }, [buildComplete, placedItems, wireToolActive, step, wiringDone]);
 
-  const explanationStep = Math.min(step - 1, STEP_EXPLANATIONS.length - 1);
-  const currentExplanation = STEP_EXPLANATIONS[Math.max(0, explanationStep)];
   const ghostItem = draggingToolId ? TOOLKIT_ITEMS.find(i => i.id === draggingToolId) ?? null : null;
+  const isAnimating = animPhase >= 0;
 
   return (
     <div className="w-full h-full relative overflow-hidden">
       <div className="absolute inset-0"
         style={{background:'linear-gradient(180deg,#f0f9ff 0%,#e0f2fe 50%,#d8f0d8 100%)'}} />
 
-      {/* 3-D Canvas */}
       <div ref={canvasRef} className="absolute inset-0">
         <Canvas style={{width:'100%',height:'100%'}} camera={{position:[0,6,24],fov:60}} shadows>
           <ambientLight intensity={0.75} />
           <directionalLight position={[10,15,8]} intensity={1.0} castShadow />
-          <pointLight position={[0,10,0]} color="#f59e0b" intensity={step>=3?3:0} distance={40} />
+          <pointLight position={[0,10,0]} color="#f59e0b" intensity={step>=3||isAnimating?3:0} distance={40} />
           <Environment preset="park" />
           <OrbitControls ref={orbitRef} enablePan={false} minDistance={5} maxDistance={35} maxPolarAngle={Math.PI/2.2} />
           <SceneContent
-            connections={connections} showExplanation={showExplanation} orbitRef={orbitRef}
+            connections={connections} orbitRef={orbitRef}
             placedItems={placedItems} buildComplete={buildComplete}
             wireToolActive={wireToolActive} draggingToolId={draggingToolId}
+            animPhase={animPhase}
             onSuccessfulConnection={handleSuccessfulConnection}
             onFailedConnection={handleFailedConnection}
           />
@@ -964,85 +1303,44 @@ export const Level3Transmission = () => {
         draggingToolId={draggingToolId}
         onItemDragStart={handleItemDragStart} onItemDragEnd={handleItemDragEnd}
         hint={hint}
+        hidden={isAnimating || showSummary}
       />
 
-      {/* Explanation panel */}
-      <AnimatePresence>
-        {showExplanation && step > 0 && step <= 4 && (
-          <motion.div initial={{opacity:0,scale:0.85}} animate={{opacity:1,scale:1}} exit={{opacity:0,scale:0.85}}
-            className="absolute inset-0 z-50 flex items-center justify-center pointer-events-auto"
-            style={{background:'rgba(0,0,0,0.15)'}}>
-            <motion.div initial={{y:30}} animate={{y:0}} className="flex flex-col items-center gap-4 px-8 py-7 rounded-3xl"
-              style={{background:'rgba(255,255,255,0.97)',boxShadow:'0 8px 40px rgba(0,0,0,0.18)',
-                border:'3px solid #fbbf24',maxWidth:440,width:'90%'}}>
-              <div className={`w-full px-4 py-3 rounded-2xl bg-gradient-to-r ${currentExplanation.color} text-white text-center font-display font-bold`}
-                style={{fontSize:'1.1rem'}}>
-                {currentExplanation.icon} {currentExplanation.title}
-              </div>
-              <p className="text-slate-700 leading-relaxed text-center" style={{fontSize:'0.95rem'}}>
-                {currentExplanation.info}
-              </p>
-              <div className="px-4 py-2.5 rounded-xl w-full text-center" style={{background:'#fefce8',border:'2px solid #fde047'}}>
-                <code className="font-bold text-amber-700" style={{fontSize:'1.1rem'}}>{currentExplanation.formula}</code>
-                <p className="text-amber-600 mt-0.5" style={{fontSize:'0.78rem'}}>{currentExplanation.formulaNote}</p>
-              </div>
-              <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={handleContinue}
-                className="px-8 py-3 rounded-2xl font-display font-bold text-white"
-                style={{
-                  background: step<3 ? 'linear-gradient(135deg,#f59e0b,#fbbf24)' : 'linear-gradient(135deg,#10b981,#34d399)',
-                  fontSize:'1.05rem',
-                  boxShadow: step<3 ? '0 4px 16px rgba(245,158,11,0.4)' : '0 4px 16px rgba(16,185,129,0.4)',
-                }}>
-                {step<3 ? `Continue → Wire Tower ${step+1}` : '🎉 See Results!'}
-              </motion.button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Right panel */}
-      <div className="absolute right-3 top-14 z-10 flex flex-col gap-3 pointer-events-auto"
-        style={{width:'clamp(210px,23vw,285px)'}}>
-        <InfoCard title="Why High Voltage?" icon="🗼" colorClass="from-amber-600 to-amber-400">
-          <p><strong>Power Loss = I²R</strong> — Doubling voltage halves current, so energy loss is reduced 4×!</p>
-          <p><strong>Step-Up Transformer:</strong> 11 kV → 132 kV using V₁/V₂ = N₁/N₂ (turns ratio).</p>
-          <p><strong>Distance:</strong> High-voltage lines carry power 500+ km with minimal waste!</p>
-        </InfoCard>
-        <div className="game-panel">
-          <h3 className="font-display font-bold text-slate-800 mb-3" style={{fontSize:'1.05rem'}}>Transmission Status</h3>
-          <div className="flex gap-2">
-            {['T→1','1→2','2→3'].map((label, i) => (
-              <div key={i} className="flex-1 text-center py-2.5 rounded-xl font-display font-bold transition-all"
-                style={{
-                  background: step>i ? 'rgba(245,158,11,0.15)' : '#f1f5f9',
-                  color: step>i ? '#d97706' : '#94a3b8',
-                  border:`2px solid ${step>i ? 'rgba(245,158,11,0.5)' : 'transparent'}`,
-                  fontSize:'0.8rem',
-                }}>{label}</div>
-            ))}
+      {/* Right info panel (hidden during animation/summary) */}
+      {!isAnimating && !showSummary && (
+        <div className="absolute right-3 top-14 z-10 flex flex-col gap-3 pointer-events-auto"
+          style={{width:'clamp(210px,23vw,285px)'}}>
+          <div className="game-panel">
+            <h3 className="font-display font-bold text-slate-800 mb-1" style={{fontSize:'0.95rem'}}>⚡ Why High Voltage?</h3>
+            <p className="text-slate-600 text-xs leading-relaxed"><strong>P_loss = I²R</strong> — Doubling voltage halves current, reducing energy loss 4×!</p>
+            <p className="text-slate-600 text-xs mt-1"><strong>132 kV</strong> lines carry power 500+ km with minimal waste.</p>
           </div>
-          {!showExplanation && step < 3 && buildComplete && (
-            <p className="text-center mt-2.5 font-bold animate-pulse" style={{color:'#22d3ee',fontSize:'0.88rem'}}>
-              〰️ Wire connection {step+1}/3 next!
+          <div className="game-panel">
+            <h3 className="font-display font-bold text-slate-800 mb-3" style={{fontSize:'1.05rem'}}>Transmission Status</h3>
+            <div className="flex gap-2">
+              {['T→1','1→2','2→3'].map((label, i) => (
+                <div key={i} className="flex-1 text-center py-2.5 rounded-xl font-display font-bold transition-all"
+                  style={{
+                    background: step>i ? 'rgba(245,158,11,0.15)' : '#f1f5f9',
+                    color: step>i ? '#d97706' : '#94a3b8',
+                    border:`2px solid ${step>i ? 'rgba(245,158,11,0.5)' : 'transparent'}`,
+                    fontSize:'0.8rem',
+                  }}>{label}</div>
+              ))}
+            </div>
+          </div>
+          <div className="game-panel text-center">
+            <p className="font-display text-slate-500 mb-1" style={{fontSize:'0.75rem'}}>TRANSMISSION VOLTAGE</p>
+            <p className="text-amber-500 font-mono font-bold" style={{fontSize:'2rem'}}>132 kV</p>
+            <p className="mt-1" style={{color:'#64748b',fontSize:'0.78rem'}}>
+              {step>=3 ? '✓ All towers connected!' : 'Awaiting connections...'}
             </p>
-          )}
-          {!buildComplete && (
-            <p className="text-center mt-2.5 font-bold animate-pulse" style={{color:'#818cf8',fontSize:'0.88rem'}}>
-              🔧 Place components first! ({REQUIRED_ITEMS.filter(id => placedItems.has(id)).length}/{REQUIRED_ITEMS.length})
-            </p>
-          )}
+          </div>
         </div>
-        <div className="game-panel text-center">
-          <p className="font-display text-slate-500 mb-1" style={{fontSize:'0.75rem'}}>TRANSMISSION VOLTAGE</p>
-          <p className="text-amber-500 font-mono font-bold" style={{fontSize:'2rem'}}>132 kV</p>
-          <p className="mt-1" style={{color:'#64748b',fontSize:'0.78rem'}}>
-            {step>=3 ? '✓ Reaching the Substation!' : 'Awaiting all connections...'}
-          </p>
-        </div>
-      </div>
+      )}
 
-      {/* Bottom prompt */}
-      {!showExplanation && (
+      {/* Bottom prompt (build / wire phase) */}
+      {!wiringDone && !isAnimating && !showSummary && (
         <motion.div className="absolute bottom-16 left-1/2 -translate-x-1/2 pointer-events-none z-20"
           animate={{y:[0,-8,0]}} transition={{duration:1.2,repeat:Infinity}}>
           <div className="px-5 py-3 rounded-full font-display font-bold shadow-xl" style={{
@@ -1061,10 +1359,58 @@ export const Level3Transmission = () => {
                 ? '〰️ Click Wire Tool → drag wires between components!'
                 : step<3
                   ? `⚡ Drag from glowing ◉ node → next tower! (${step}/3 connected)`
-                  : '⚡ Network complete — power is flowing!'}
+                  : '⚡ Network complete!'}
           </div>
         </motion.div>
       )}
+
+      {/* START ANIMATION BUTTON — shown when wiring is done, before animation */}
+      <AnimatePresence>
+        {wiringDone && !isAnimating && !showSummary && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: 30 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: -20 }}
+            className="absolute bottom-0 left-0 right-0 z-40 flex flex-col items-center justify-end pb-8"
+            style={{ pointerEvents: 'auto' }}
+          >
+            <motion.div
+              animate={{ boxShadow: ['0 0 20px rgba(245,158,11,0.4)', '0 0 50px rgba(245,158,11,0.8)', '0 0 20px rgba(245,158,11,0.4)'] }}
+              transition={{ duration: 1.5, repeat: Infinity }}
+              style={{ borderRadius: '50px' }}
+            >
+              <motion.button
+                whileHover={{ scale: 1.07 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={startAnimation}
+                style={{
+                  padding: '18px 48px', borderRadius: '50px', border: '3px solid #fbbf24',
+                  background: 'linear-gradient(135deg,#1c1917,#292524)',
+                  color: '#fbbf24', fontWeight: 800, fontSize: '1.25rem',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px',
+                  fontFamily: 'system-ui, sans-serif', letterSpacing: '0.02em',
+                }}
+              >
+                <span style={{ fontSize: '1.5rem' }}>⚡</span>
+                Start Electricity Network Connectivity
+                <span style={{ fontSize: '1.5rem' }}>⚡</span>
+              </motion.button>
+            </motion.div>
+            <p style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '10px', fontWeight: 500 }}>
+              Watch the full 10-second electricity flow animation!
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Animation overlay */}
+      {isAnimating && <AnimationOverlay phase={animPhase} progress={Math.min(animProgress, 12)} />}
+
+      {/* Connection toast */}
+      <ConnectionToast message={toastMsg} visible={toastVisible} />
+
+      {/* Summary card */}
+      {showSummary && <SummaryCard onNextLevel={handleNextLevel} />}
     </div>
   );
 };

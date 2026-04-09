@@ -161,7 +161,7 @@ export const VoltGuide = () => {
 
 export const NextLevelButton = () => {
   const { levelComplete, nextLevel, currentLevel } = useGameStore();
-  if (currentLevel === 0 || currentLevel === 1 || currentLevel === 9) return null;
+  if (currentLevel === 0 || currentLevel === 1 || currentLevel === 3 || currentLevel === 9) return null;
 
   const NEXT_LABELS: Record<number, string> = {
     1: '⚙️ Explore the Generator',
