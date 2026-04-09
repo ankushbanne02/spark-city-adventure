@@ -597,7 +597,7 @@ export const Level1Dam = () => {
       {showSummary && <SummaryCard onNext={handleSummaryNext} />}
 
       {/* Right panel */}
-      {!showSummary && (
+      {!showSummary && !generating && (
         <div
           className="absolute right-3 top-14 z-10 flex flex-col gap-3 pointer-events-auto"
           style={{ width: 'clamp(200px, 22vw, 280px)' }}
