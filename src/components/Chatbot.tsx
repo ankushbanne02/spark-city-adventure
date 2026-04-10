@@ -230,7 +230,7 @@ export function Chatbot() {
         }}
         title="Open Spark Assistant"
       >
-        {open ? '✕' : '💬'}
+        {open ? '✕' : '🤖'}
       </button>
     </div>
   );
