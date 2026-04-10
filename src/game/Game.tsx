@@ -10,6 +10,7 @@ import { Level5House } from '../components/levels/Level5House';
 import { Level6Wiring } from '../components/levels/Level6Wiring';
 import { Level7Consumption } from '../components/levels/Level7Consumption';
 import { Level8SmartHome } from '../components/levels/Level8SmartHome';
+import { Chatbot } from '../components/Chatbot';
 
 function GameContent() {
   const { currentLevel } = useGameStore();
@@ -32,6 +33,7 @@ function GameContent() {
         <GameHUD />
         <VoltGuide />
         <NextLevelButton />
+        {currentLevel >= 1 && currentLevel <= 8 && <Chatbot />}
 
         {currentLevel === 0 && <StartScreen />}
         {currentLevel === 1 && <Level1Dam />}
