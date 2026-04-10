@@ -624,7 +624,7 @@ export const Level1Dam = () => {
             </motion.div>
           </AnimatePresence>
 
-          <InfoCard title="How Hydro Works" icon="🌊" colorClass="from-blue-800 to-blue-600">
+          {/* <InfoCard title="How Hydro Works" icon="🌊" colorClass="from-blue-800 to-blue-600">
             <div className="space-y-1.5">
               {[
                 { label: 'Potential Energy', formula: 'PE = mgh', color: '#3b82f6' },
@@ -638,7 +638,7 @@ export const Level1Dam = () => {
                 </div>
               ))}
             </div>
-          </InfoCard>
+          </InfoCard> */}
 
           <div className="game-panel">
             <h3 className="font-display font-bold text-slate-700 mb-3" style={{ fontSize: '0.95rem' }}>Generation Sequence</h3>

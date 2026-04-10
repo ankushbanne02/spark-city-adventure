@@ -890,7 +890,11 @@ const ConnectionToast = ({ message, visible }: { message: string; visible: boole
 const AnimationOverlay = ({ phase, progress }: { phase: number; progress: number }) => {
   if (phase < 0) return null;
   const phaseData = ANIM_PHASES[Math.min(phase, ANIM_PHASES.length - 1)];
-  const totalProgress = Math.round((progress / 12) * 100);
+  // const totalProgress = Math.round((progress / 12) * 100);
+
+
+  const TOTAL = 7* ANIM_PHASES.length;
+const totalProgress = Math.round((progress / TOTAL) * 100);
 
   return (
     <div style={{
@@ -923,11 +927,13 @@ const AnimationOverlay = ({ phase, progress }: { phase: number; progress: number
         </div>
       </div>
 
-      {/* Bottom-left: phase card */}
-      <div style={{
-        position: 'absolute', bottom: '16px', left: '12px',
-        width: 'min(340px, 40vw)',
-      }}>
+     <div style={{
+  position: 'absolute',
+  bottom: '20px',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  width: 'min(420px, 90vw)',
+}}>
         {/* Flow path strip above the card */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap',
@@ -1178,16 +1184,27 @@ export const Level3Transmission = () => {
     setAnimProgress(0);
     setVoltMessage('🎬 Watch electricity flow through the entire transmission network!');
 
+    // let elapsed = 0;
+    // const TOTAL = 12;
+    // const TICK = 0.1;
+
+
     let elapsed = 0;
-    const TOTAL = 12;
-    const TICK = 0.1;
+const PHASE_DURATION = 7; // seconds per card
+const TOTAL = PHASE_DURATION * ANIM_PHASES.length;
+const TICK = 0.1;
 
     animTimerRef.current = setInterval(() => {
       elapsed += TICK;
       setAnimProgress(elapsed);
 
       // Phase boundaries: 0-2, 2-4, 4-6, 6-8, 8-10, 10-12
-      const newPhase = Math.min(Math.floor(elapsed / 2), ANIM_PHASES.length - 1);
+      // const newPhase = Math.min(Math.floor(elapsed / 2), ANIM_PHASES.length - 1);
+
+      const newPhase = Math.min(
+  Math.floor(elapsed / PHASE_DURATION),
+  ANIM_PHASES.length - 1
+);
       setAnimPhase(newPhase);
 
       if (elapsed >= TOTAL) {

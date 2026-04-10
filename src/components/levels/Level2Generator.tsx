@@ -286,7 +286,7 @@ export const Level2Generator = () => {
           ))}
         </div>
 
-        <div className="game-panel" style={{ background: '#fefce8', border: '2px solid #fde047' }}>
+        {/* <div className="game-panel" style={{ background: '#fefce8', border: '2px solid #fde047' }}>
           <h4 className="font-display font-bold text-amber-700 mb-2" style={{ fontSize: '0.9rem' }}>📐 Key Formula</h4>
           <code className="block font-bold text-center text-purple-700" style={{ fontSize: '0.95rem' }}>
             EMF = −N × dΦ/dt
@@ -297,7 +297,7 @@ export const Level2Generator = () => {
           <p className="text-slate-600 mt-1" style={{ fontSize: '0.78rem' }}>
             <strong>Rotor</strong> = rotating magnet &nbsp;|&nbsp; <strong>Stator</strong> = copper coils
           </p>
-        </div>
+        </div> */}
 
         <AnimatePresence>
           {step === 0 && (
